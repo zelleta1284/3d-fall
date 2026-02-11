@@ -22,50 +22,128 @@ def quad_from_floor(bl, br, tr, tl, x0, y0, x1, y1):
     return np.array([p0, p1, p2, p3], dtype=np.int32)
 
 
-def draw_scene(frame, bl, br, tr, tl, t):
+def _color_variation(base, scale=12):
+    return tuple(int(max(0, min(255, c + np.random.randint(-scale, scale + 1)))) for c in base)
+
+
+def _draw_shadow(frame, poly, offset=(6, 6), alpha=0.35):
+    shadow = poly + np.array(offset, dtype=np.int32)
+    overlay = frame.copy()
+    cv2.fillPoly(overlay, [shadow], (0, 0, 0))
+    cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0, frame)
+
+
+def _fill_floor_boards(frame, bl, br, tr, tl, n_boards=14):
+    base = (78, 82, 86)
+    for i in range(n_boards):
+        v0 = i / n_boards
+        v1 = (i + 1) / n_boards
+        quad = quad_from_floor(bl, br, tr, tl, 0, v0, 1, v1)
+        color = _color_variation(base, scale=10)
+        cv2.fillPoly(frame, [quad], color)
+        # subtle board seam
+        p0 = quad_interp(bl, br, tr, tl, 0, v1).astype(int)
+        p1 = quad_interp(bl, br, tr, tl, 1, v1).astype(int)
+        cv2.line(frame, p0, p1, (60, 65, 70), 1)
+
+
+def _draw_rug_pattern(frame, bl, br, tr, tl, x0, y0, x1, y1, color_a, color_b, nx=6, ny=6):
+    for i in range(nx):
+        for j in range(ny):
+            u0 = x0 + (x1 - x0) * (i / nx)
+            v0 = y0 + (y1 - y0) * (j / ny)
+            u1 = x0 + (x1 - x0) * ((i + 1) / nx)
+            v1 = y0 + (y1 - y0) * ((j + 1) / ny)
+            quad = quad_from_floor(bl, br, tr, tl, u0, v0, u1, v1)
+            color = color_a if (i + j) % 2 == 0 else color_b
+            cv2.fillPoly(frame, [quad], color)
+
+
+def draw_scene(frame, bl, br, tr, tl, t, layout):
     h, w, _ = frame.shape
 
     # Walls and floor
-    floor_color = (70, 80, 90)
-    wall_color = (110, 120, 130)
-    back_wall_color = (120, 130, 140)
-
     floor = np.array([bl, br, tr, tl], dtype=np.int32)
-    cv2.fillPoly(frame, [floor], floor_color)
+    _fill_floor_boards(frame, bl, br, tr, tl)
 
     # back wall
-    wall_top = np.array([[int(w * 0.25), int(h * 0.1)], [int(w * 0.75), int(h * 0.1)], tr.astype(int), tl.astype(int)], dtype=np.int32)
-    cv2.fillPoly(frame, [wall_top], back_wall_color)
+    wall_top = np.array(
+        [
+            [int(w * 0.25), int(h * 0.1)],
+            [int(w * 0.75), int(h * 0.1)],
+            tr.astype(int),
+            tl.astype(int),
+        ],
+        dtype=np.int32,
+    )
+    cv2.fillPoly(frame, [wall_top], (120, 128, 138))
 
     # side walls
-    left_wall = np.array([[int(w * 0.05), int(h * 0.15)], [int(w * 0.25), int(h * 0.1)], tl.astype(int), bl.astype(int)], dtype=np.int32)
-    right_wall = np.array([[int(w * 0.95), int(h * 0.15)], [int(w * 0.75), int(h * 0.1)], tr.astype(int), br.astype(int)], dtype=np.int32)
-    cv2.fillPoly(frame, [left_wall], wall_color)
-    cv2.fillPoly(frame, [right_wall], wall_color)
+    left_wall = np.array(
+        [
+            [int(w * 0.05), int(h * 0.15)],
+            [int(w * 0.25), int(h * 0.1)],
+            tl.astype(int),
+            bl.astype(int),
+        ],
+        dtype=np.int32,
+    )
+    right_wall = np.array(
+        [
+            [int(w * 0.95), int(h * 0.15)],
+            [int(w * 0.75), int(h * 0.1)],
+            tr.astype(int),
+            br.astype(int),
+        ],
+        dtype=np.int32,
+    )
+    cv2.fillPoly(frame, [left_wall], (112, 122, 132))
+    cv2.fillPoly(frame, [right_wall], (112, 122, 132))
 
-    # Floor grid
-    for i in range(1, 10):
-        v = i / 10.0
-        p0 = quad_interp(bl, br, tr, tl, 0, v).astype(int)
-        p1 = quad_interp(bl, br, tr, tl, 1, v).astype(int)
-        cv2.line(frame, p0, p1, (60, 70, 80), 1)
-    for i in range(1, 10):
-        u = i / 10.0
-        p0 = quad_interp(bl, br, tr, tl, u, 0).astype(int)
-        p1 = quad_interp(bl, br, tr, tl, u, 1).astype(int)
-        cv2.line(frame, p0, p1, (60, 70, 80), 1)
+    if layout == "living":
+        rug = quad_from_floor(bl, br, tr, tl, 0.18, 0.18, 0.5, 0.5)
+        _draw_rug_pattern(frame, bl, br, tr, tl, 0.18, 0.18, 0.5, 0.5, (55, 60, 65), (45, 50, 55))
 
-    # Rug
-    rug = quad_from_floor(bl, br, tr, tl, 0.2, 0.2, 0.45, 0.45)
-    cv2.fillPoly(frame, [rug], (45, 55, 60))
+        sofa = quad_from_floor(bl, br, tr, tl, 0.58, 0.55, 0.92, 0.82)
+        _draw_shadow(frame, sofa, offset=(8, 6), alpha=0.3)
+        cv2.fillPoly(frame, [sofa], (90, 95, 100))
 
-    # Coffee table
-    table = quad_from_floor(bl, br, tr, tl, 0.55, 0.35, 0.75, 0.55)
-    cv2.fillPoly(frame, [table], (90, 80, 70))
+        table = quad_from_floor(bl, br, tr, tl, 0.55, 0.32, 0.78, 0.52)
+        _draw_shadow(frame, table, offset=(6, 4), alpha=0.25)
+        cv2.fillPoly(frame, [table], (100, 90, 80))
 
-    # Chair
-    chair = quad_from_floor(bl, br, tr, tl, 0.1, 0.5, 0.22, 0.7)
-    cv2.fillPoly(frame, [chair], (80, 75, 70))
+        chair = quad_from_floor(bl, br, tr, tl, 0.08, 0.48, 0.23, 0.68)
+        _draw_shadow(frame, chair, offset=(5, 4), alpha=0.25)
+        cv2.fillPoly(frame, [chair], (85, 80, 75))
+
+        console = quad_from_floor(bl, br, tr, tl, 0.25, 0.75, 0.45, 0.88)
+        cv2.fillPoly(frame, [console], (95, 85, 80))
+    elif layout == "bedroom":
+        bed = quad_from_floor(bl, br, tr, tl, 0.12, 0.33, 0.6, 0.75)
+        _draw_shadow(frame, bed, offset=(8, 6), alpha=0.3)
+        cv2.fillPoly(frame, [bed], (90, 95, 105))
+
+        quilt = quad_from_floor(bl, br, tr, tl, 0.15, 0.38, 0.52, 0.68)
+        cv2.fillPoly(frame, [quilt], (70, 85, 95))
+
+        nightstand = quad_from_floor(bl, br, tr, tl, 0.62, 0.42, 0.76, 0.55)
+        _draw_shadow(frame, nightstand, offset=(4, 3), alpha=0.25)
+        cv2.fillPoly(frame, [nightstand], (80, 75, 70))
+
+        rug = quad_from_floor(bl, br, tr, tl, 0.05, 0.2, 0.22, 0.32)
+        _draw_rug_pattern(frame, bl, br, tr, tl, 0.05, 0.2, 0.22, 0.32, (60, 65, 70), (50, 55, 60), nx=4, ny=3)
+    elif layout == "kitchen":
+        counter = quad_from_floor(bl, br, tr, tl, 0.05, 0.55, 0.42, 0.88)
+        _draw_shadow(frame, counter, offset=(6, 5), alpha=0.25)
+        cv2.fillPoly(frame, [counter], (105, 100, 95))
+
+        island = quad_from_floor(bl, br, tr, tl, 0.48, 0.35, 0.8, 0.62)
+        _draw_shadow(frame, island, offset=(7, 5), alpha=0.3)
+        cv2.fillPoly(frame, [island], (110, 105, 100))
+
+        stool = quad_from_floor(bl, br, tr, tl, 0.82, 0.42, 0.9, 0.52)
+        _draw_shadow(frame, stool, offset=(4, 3), alpha=0.25)
+        cv2.fillPoly(frame, [stool], (80, 80, 80))
 
     # Window on back wall
     window_rect = np.array([
@@ -75,10 +153,11 @@ def draw_scene(frame, bl, br, tr, tl, t):
         [int(w * 0.4), int(h * 0.32)],
     ], dtype=np.int32)
     cv2.fillPoly(frame, [window_rect], (170, 180, 200))
+    cv2.rectangle(frame, (int(w * 0.46), int(h * 0.18)), (int(w * 0.54), int(h * 0.3)), (200, 210, 220), 2)
 
     # Glare patch on floor (moves with t)
-    glare_center_u = 0.35 + 0.1 * np.sin(t * 2 * np.pi)
-    glare_center_v = 0.35 + 0.1 * np.cos(t * 2 * np.pi)
+    glare_center_u = 0.35 + 0.08 * np.sin(t * 2 * np.pi)
+    glare_center_v = 0.35 + 0.06 * np.cos(t * 2 * np.pi)
     glare = quad_from_floor(bl, br, tr, tl, glare_center_u - 0.08, glare_center_v - 0.04, glare_center_u + 0.08, glare_center_v + 0.04)
     overlay = frame.copy()
     cv2.fillPoly(overlay, [glare], (200, 200, 210))
@@ -92,6 +171,7 @@ def main() -> None:
     parser.add_argument("--fps", type=int, default=24)
     parser.add_argument("--width", type=int, default=1280)
     parser.add_argument("--height", type=int, default=720)
+    parser.add_argument("--layout", choices=["living", "bedroom", "kitchen"], default="living")
     args = parser.parse_args()
 
     out_path = Path(args.out)
@@ -115,7 +195,7 @@ def main() -> None:
         tl = np.array([int(args.width * 0.35 - depth), int(args.height * 0.45)])
         tr = np.array([int(args.width * 0.65 - depth), int(args.height * 0.45)])
 
-        draw_scene(frame, bl, br, tr, tl, t)
+        draw_scene(frame, bl, br, tr, tl, t, args.layout)
         writer.write(frame)
 
     writer.release()

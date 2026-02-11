@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [[ $# -lt 1 ]]; then
-  VIDEO="/Users/alextellez/Documents/New project/3d-fall/examples/surestep_example.mp4"
+  VIDEO="/Users/alextellez/Documents/New project/3d-fall/examples/surestep_living.mp4"
 else
   VIDEO="$1"
 fi
