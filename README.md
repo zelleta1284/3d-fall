@@ -44,9 +44,9 @@ pip install -r requirements.txt
 
 You also need COLMAP installed and in your PATH.
 
-### Included example video
+### Included example videos
 
-Use the bundled synthetic scan in `examples/surestep_example.mp4` to test the pipeline quickly.
+Use the real living-room scan that you provided at `examples/surestep_living.mp4` to test the full pipeline quickly. The matching mesh preview and mesh file live at `examples/mesh_preview_living.mp4` and `examples/meshes/surestep_living.ply`. The bedroom/kitchen/bathroom samples remain the synthetic SureStep examples.
 
 ### 2) One-command run (recommended)
 
