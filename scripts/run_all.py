@@ -16,6 +16,7 @@ from digital_twin.pipeline import run_pipeline
 from digital_twin.simulate_risk import build_grids, load_mesh_vertices, simulate_risk
 from digital_twin.window_detection import detect_window_planes
 from digital_twin.reporting import compute_hotspots, save_report_json
+from digital_twin.scale_estimation import estimate_scale_from_mesh, load_mesh_vertices as load_scale_vertices, scale_mesh
 
 
 def _ensure_dir(path: Path) -> None:
@@ -105,7 +106,16 @@ def _make_report(
         "biomechanics": cfg.get("biomechanics", {}),
         "lighting": cfg.get("lighting", {}),
         "physics": cfg.get("physics", {}),
+        "patient": cfg.get("patient", {}),
+        "scale_result": cfg.get("scale_result", {}),
     }
+
+    interp_path = heatmap_path.parent / "room_interpretation.json"
+    if interp_path.exists():
+        try:
+            metadata["room_interpretation"] = yaml.safe_load(interp_path.read_text(encoding="utf-8"))
+        except Exception:
+            metadata["room_interpretation"] = {}
 
     _ensure_dir(out_dir)
     json_path = out_dir / "report.json"
@@ -149,11 +159,14 @@ def main() -> None:
     parser.add_argument("--video", required=True, help="Path to input .mp4")
     parser.add_argument("--workdir", required=True, help="Working directory for outputs")
     parser.add_argument("--config", required=True, help="Path to YAML config")
+    parser.add_argument("--intake", help="Path to intake JSON/YAML")
     parser.add_argument("--fps", type=float, default=2.0, help="Frames per second to sample")
     parser.add_argument("--median-depth-m", type=float, default=2.5)
     parser.add_argument("--scale-distance", type=float, default=None, help="Known distance in meters")
     parser.add_argument("--picked", help="picked_points.json path for scaling")
     parser.add_argument("--auto-windows", action="store_true", help="Auto-detect windows and update config copy")
+    parser.add_argument("--auto-scale", dest="auto_scale", action="store_true", default=True, help="Auto-scale mesh using priors (default)")
+    parser.add_argument("--no-auto-scale", dest="auto_scale", action="store_false", help="Disable auto-scale priors")
     parser.add_argument("--no-mesh-video", action="store_true", help="Skip mesh preview video")
     args = parser.parse_args()
 
@@ -169,14 +182,35 @@ def main() -> None:
     )
 
     final_mesh = mesh_path
+    scale_result = None
     if args.scale_distance:
         scaled = workdir / "mesh_scaled.ply"
         picked = Path(args.picked) if args.picked else None
         final_mesh = _scale_mesh(mesh_path, args.scale_distance, picked, scaled)
+        scale_result = {
+            "method": "known_distance",
+            "distance_m": args.scale_distance,
+        }
+    elif args.auto_scale:
+        try:
+            vertices = load_scale_vertices(mesh_path)
+            scale_info = estimate_scale_from_mesh(vertices)
+            scaled = workdir / "mesh_scaled_auto.ply"
+            scale_mesh(mesh_path, scaled, scale_info["scale"])
+            final_mesh = scaled
+            scale_result = scale_info
+        except Exception as exc:
+            print(f"Auto-scale skipped: {exc}")
 
     config_src = Path(args.config)
     config_out = workdir / "config_used.yaml"
     cfg = _load_config(config_src)
+    if args.intake:
+        intake_path = Path(args.intake)
+        intake = _load_config(intake_path)
+        if isinstance(intake, dict):
+            cfg.setdefault("patient", {})
+            cfg["patient"].update(intake)
 
     if args.auto_windows:
         candidates = detect_window_planes(final_mesh)
@@ -192,6 +226,9 @@ def main() -> None:
         ]
         cfg = _insert_windows(cfg, windows)
         print(f"Detected {len(windows)} window candidates.")
+
+    if scale_result:
+        cfg["scale_result"] = scale_result
 
     _save_config(config_out, cfg)
 

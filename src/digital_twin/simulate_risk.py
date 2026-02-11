@@ -1,3 +1,4 @@
+import json
 import math
 from dataclasses import dataclass
 from pathlib import Path
@@ -66,6 +67,7 @@ class SimConfig:
     lighting: Optional[LightingSpec]
     physics: PhysicsSpec
     risk: RiskSpec
+    patient: Optional[Dict[str, object]]
 
 
 def _safe_float(val: Optional[float], default: float) -> float:
@@ -164,6 +166,8 @@ def load_config(path: Path) -> SimConfig:
         weights=weights,
     )
 
+    patient = cfg.get("patient")
+
     return SimConfig(
         room=room,
         paths=paths,
@@ -172,16 +176,128 @@ def load_config(path: Path) -> SimConfig:
         lighting=lighting,
         physics=physics,
         risk=risk,
+        patient=patient,
     )
 
 
-def load_mesh_vertices(mesh_path: Path) -> np.ndarray:
-    import open3d as o3d
+def _apply_patient_intake(cfg: SimConfig) -> Dict[str, object]:
+    effects: Dict[str, object] = {"adjustments": []}
 
-    mesh = o3d.io.read_triangle_mesh(str(mesh_path))
-    if mesh.is_empty():
-        raise RuntimeError("Mesh is empty; check reconstruction output.")
-    return np.asarray(mesh.vertices)
+    def record(field: str, old: float, new: float, reason: str) -> None:
+        if abs(old - new) > 1e-6:
+            effects["adjustments"].append(
+                {"field": field, "from": float(old), "to": float(new), "reason": reason}
+            )
+
+    if not cfg.patient:
+        return effects
+
+    age = cfg.patient.get("age")
+    fall_recent = cfg.patient.get("fall_last_6_months")
+    hospitalized = cfg.patient.get("fall_hospitalized")
+    needs_aid = cfg.patient.get("assistive_aid")
+    self_transfer = cfg.patient.get("can_get_out_of_bed")
+
+    # Age adjustments (small, conservative)
+    if isinstance(age, (int, float)) and age >= 70:
+        old = cfg.gait.speed_mps
+        cfg.gait.speed_mps *= 0.9
+        record("gait.speed_mps", old, cfg.gait.speed_mps, "age>=70")
+
+        old = cfg.biomechanics.reaction_time_s
+        cfg.biomechanics.reaction_time_s *= 1.1
+        record("biomechanics.reaction_time_s", old, cfg.biomechanics.reaction_time_s, "age>=70")
+    if isinstance(age, (int, float)) and age >= 80:
+        old = cfg.gait.speed_mps
+        cfg.gait.speed_mps *= 0.85
+        record("gait.speed_mps", old, cfg.gait.speed_mps, "age>=80")
+
+        old = cfg.biomechanics.foot_clearance_m
+        cfg.biomechanics.foot_clearance_m *= 0.9
+        record("biomechanics.foot_clearance_m", old, cfg.biomechanics.foot_clearance_m, "age>=80")
+
+    # Fall history increases base risk slightly
+    if fall_recent is True:
+        old = cfg.risk.weights.obstacle
+        cfg.risk.weights.obstacle *= 1.1
+        record("risk.weights.obstacle", old, cfg.risk.weights.obstacle, "fall_last_6_months")
+        old = cfg.risk.weights.slip
+        cfg.risk.weights.slip *= 1.1
+        record("risk.weights.slip", old, cfg.risk.weights.slip, "fall_last_6_months")
+        old = cfg.risk.weights.trip
+        cfg.risk.weights.trip *= 1.1
+        record("risk.weights.trip", old, cfg.risk.weights.trip, "fall_last_6_months")
+    if hospitalized is True:
+        old = cfg.risk.weights.obstacle
+        cfg.risk.weights.obstacle *= 1.15
+        record("risk.weights.obstacle", old, cfg.risk.weights.obstacle, "fall_hospitalized")
+        old = cfg.risk.weights.slip
+        cfg.risk.weights.slip *= 1.15
+        record("risk.weights.slip", old, cfg.risk.weights.slip, "fall_hospitalized")
+        old = cfg.risk.weights.trip
+        cfg.risk.weights.trip *= 1.15
+        record("risk.weights.trip", old, cfg.risk.weights.trip, "fall_hospitalized")
+
+    # Assistive aid reduces instability but can reduce speed
+    if needs_aid is True:
+        cfg.biomechanics.cane = True
+        record("biomechanics.cane", 0.0, 1.0, "assistive_aid")
+
+        old = cfg.gait.speed_mps
+        cfg.gait.speed_mps *= 0.9
+        record("gait.speed_mps", old, cfg.gait.speed_mps, "assistive_aid")
+
+        old = cfg.gait.lateral_std
+        cfg.gait.lateral_std *= 0.9
+        record("gait.lateral_std", old, cfg.gait.lateral_std, "assistive_aid")
+
+    # If cannot self-transfer, increase risk weighting for turn/slip
+    if self_transfer is False:
+        old = cfg.risk.weights.turn
+        cfg.risk.weights.turn *= 1.1
+        record("risk.weights.turn", old, cfg.risk.weights.turn, "cannot_get_out_of_bed")
+        old = cfg.risk.weights.slip
+        cfg.risk.weights.slip *= 1.1
+        record("risk.weights.slip", old, cfg.risk.weights.slip, "cannot_get_out_of_bed")
+
+    if cfg.patient.get("gender"):
+        effects.setdefault("notes", []).append("gender recorded; no model adjustment applied")
+
+    return effects
+
+
+def _load_ply_ascii(path: Path) -> np.ndarray:
+    with path.open("r", encoding="utf-8") as f:
+        line = f.readline().strip()
+        if line != "ply":
+            raise RuntimeError("Not a PLY file")
+        line = f.readline().strip()
+        if "ascii" not in line:
+            raise RuntimeError("PLY is not ascii")
+        vertex_count = 0
+        while True:
+            line = f.readline().strip()
+            if line.startswith("element vertex"):
+                vertex_count = int(line.split()[-1])
+            elif line.startswith("end_header"):
+                break
+        vertices = []
+        for _ in range(vertex_count):
+            parts = f.readline().strip().split()
+            vertices.append([float(parts[0]), float(parts[1]), float(parts[2])])
+        return np.array(vertices, dtype=np.float32)
+
+
+def load_mesh_vertices(mesh_path: Path) -> np.ndarray:
+    try:
+        import open3d as o3d
+
+        mesh = o3d.io.read_triangle_mesh(str(mesh_path))
+        if mesh.is_empty():
+            raise RuntimeError("Mesh is empty; check reconstruction output.")
+        return np.asarray(mesh.vertices)
+    except Exception:
+        return _load_ply_ascii(mesh_path)
 
 
 def build_grids(vertices: np.ndarray, grid_size: float, obstacle_height: float):
@@ -309,7 +425,10 @@ def simulate_risk(mesh_path: Path, config_path: Path, out_dir: Path) -> Path:
     import matplotlib.pyplot as plt
 
     cfg = load_config(config_path)
+    patient_effects = _apply_patient_intake(cfg)
     vertices = load_mesh_vertices(mesh_path)
+    floor_z = float(np.percentile(vertices[:, 2], 2))
+    ceil_z = float(np.percentile(vertices[:, 2], 98))
     obstacle_grid, height_grid, min_xy, floor_z = build_grids(
         vertices, cfg.room.grid_size_m, cfg.room.obstacle_height_m
     )
@@ -389,6 +508,32 @@ def simulate_risk(mesh_path: Path, config_path: Path, out_dir: Path) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     heat_path = out_dir / "risk_heatmap.npy"
     np.save(heat_path, heat)
+
+    interpretation = {
+        "room": {
+            "floor_z_estimate_m": floor_z,
+            "ceiling_z_estimate_m": ceil_z,
+            "height_span_m": float(ceil_z - floor_z),
+            "grid_size_m": cfg.room.grid_size_m,
+            "obstacle_height_threshold_m": cfg.room.obstacle_height_m,
+            "obstacle_cells": int(obstacle_grid.sum()),
+            "obstacle_ratio": float(obstacle_grid.sum() / max(obstacle_grid.size, 1)),
+            "friction_zones": len(cfg.room.friction_zones),
+            "lighting_windows": len(cfg.lighting.windows) if cfg.lighting else 0,
+            "lighting_lights": len(cfg.lighting.lights) if cfg.lighting else 0,
+        },
+        "patient": cfg.patient or {},
+        "patient_effects": patient_effects,
+        "notes": [
+            "Floor/ceiling estimated from z-percentiles of mesh vertices.",
+            "Obstacles defined as heights above floor_z + obstacle_height_threshold_m.",
+            "Risk integrates obstacle proximity, turn curvature, slip (friction), trip (clearance), and glare.",
+            "Patient intake may adjust parameters; see patient_effects.adjustments.",
+        ],
+    }
+    interp_path = out_dir / "room_interpretation.json"
+    with interp_path.open("w", encoding="utf-8") as f:
+        json.dump(interpretation, f, indent=2)
 
     # Normalize for visualization
     max_val = np.percentile(heat, 99) if np.any(heat) else 1.0

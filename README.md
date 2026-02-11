@@ -4,6 +4,20 @@ Generate a coarse digital twin from an .mp4 and run a fall-risk heatmap simulati
 
 This project reconstructs a mesh from monocular video (COLMAP + AI depth), then simulates risk using gait parameters, room friction zones, sun glare, and optional physics-engine collision checks.
 
+## Inputs
+
+### Video
+- `.mp4` scan of each room (living room, bedroom, kitchen, bathroom).
+
+### Intake (Jotform)
+Provide a JSON/YAML payload with:
+- `age` (number)
+- `gender` (string)
+- `fall_last_6_months` (true/false)
+- `fall_hospitalized` (true/false)
+- `can_get_out_of_bed` (true/false)
+- `assistive_aid` (true/false)
+
 ## What this does
 
 1) Extracts frames from a video.
@@ -42,6 +56,20 @@ Use the bundled synthetic scan in `examples/surestep_example.mp4` to test the pi
 ```
 
 This also generates a mesh preview video (`mesh_preview.mp4`) with shaded surfaces and optional wireframe overlay so users can see the reconstructed geometry.
+
+You can also pass a Jotform intake payload to include patient context:
+
+```bash
+./scripts/run_all.py \
+  --video /path/to/room.mp4 \
+  --workdir /tmp/surestep_run \
+  --config /Users/alextellez/Documents/New\ project/3d-fall/config/example.yaml \
+  --intake /Users/alextellez/Documents/New\ project/3d-fall/examples/intake_example.json \
+  --auto-windows
+```
+
+Auto-scaling: when you do not provide a known distance, the pipeline will estimate scale using home-size priors (ceiling height, door height, countertop height, etc.). Disable with `--no-auto-scale`.
+Priors include common heights like door frames (~2.03m), counters (~0.91m), beds (~0.5m), sofa/chair seats (~0.45m), and toilet seats (~0.43m).
 
 ### 3) Manual steps (for debugging)
 
@@ -89,7 +117,9 @@ Edit `config/example.yaml` to set path start/goal points, windows, and friction 
 Outputs:
 - `/tmp/room_recon/risk/risk_heatmap.png`
 - `/tmp/room_recon/risk/risk_heatmap.npy`
- - `/tmp/surestep_run/mesh_preview.mp4`
+- `/tmp/room_recon/risk/room_interpretation.json`
+
+`room_interpretation.json` explains how the mesh was interpreted (floor/ceiling estimates, obstacle thresholds) and how intake inputs adjusted parameters.
 
 ### 8) Generate a report (JSON + PDF)
 
@@ -125,4 +155,6 @@ Use the mesh bounds output from `inspect_mesh.py` to fill `--min-xy`.
 - `scripts/generate_report.py`: report generator
 - `scripts/render_mesh_video.py`: mesh preview video
 - `scripts/run_all.py`: end-to-end pipeline
+- `scripts/auto_scale_mesh.py`: auto-scale helper using priors
+- `scripts/generate_example_meshes.py`: generate synthetic example meshes
 - `config/example.yaml`: example config

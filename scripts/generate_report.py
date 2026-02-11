@@ -37,7 +37,15 @@ def main() -> None:
         "biomechanics": cfg.get("biomechanics", {}),
         "lighting": cfg.get("lighting", {}),
         "physics": cfg.get("physics", {}),
+        "patient": cfg.get("patient", {}),
     }
+
+    interp_path = Path(args.heatmap).parent / "room_interpretation.json"
+    if interp_path.exists():
+        try:
+            metadata["room_interpretation"] = yaml.safe_load(interp_path.read_text(encoding="utf-8"))
+        except Exception:
+            metadata["room_interpretation"] = {}
 
     json_path = out_dir / "report.json"
     save_report_json(json_path, metadata, hotspots)

@@ -11,6 +11,39 @@ def _normalize(v: np.ndarray) -> np.ndarray:
     return v / n
 
 
+def _load_ply_ascii(path: Path):
+    with path.open("r", encoding="utf-8") as f:
+        line = f.readline().strip()
+        if line != "ply":
+            raise RuntimeError("Not a PLY file")
+        line = f.readline().strip()
+        if "ascii" not in line:
+            raise RuntimeError("PLY is not ascii")
+        vertex_count = 0
+        face_count = 0
+        while True:
+            line = f.readline().strip()
+            if line.startswith("element vertex"):
+                vertex_count = int(line.split()[-1])
+            elif line.startswith("element face"):
+                face_count = int(line.split()[-1])
+            elif line.startswith("end_header"):
+                break
+        vertices = []
+        for _ in range(vertex_count):
+            parts = f.readline().strip().split()
+            vertices.append([float(parts[0]), float(parts[1]), float(parts[2])])
+        faces = []
+        for _ in range(face_count):
+            parts = f.readline().strip().split()
+            if not parts:
+                continue
+            n = int(parts[0])
+            if n >= 3:
+                faces.append([int(parts[1]), int(parts[2]), int(parts[3])])
+        return np.array(vertices, dtype=np.float32), np.array(faces, dtype=np.int32)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Render a rotating mesh preview video.")
     parser.add_argument("--mesh", required=True, help="Path to mesh.ply")
@@ -23,7 +56,6 @@ def main() -> None:
     parser.add_argument("--wireframe", action="store_true", help="Overlay wireframe edges")
     args = parser.parse_args()
 
-    import open3d as o3d
     import matplotlib
 
     matplotlib.use("Agg")
@@ -31,16 +63,31 @@ def main() -> None:
     import cv2
     from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
-    mesh = o3d.io.read_triangle_mesh(args.mesh)
-    if mesh.is_empty():
-        raise RuntimeError("Mesh is empty.")
+    use_open3d = False
+    mesh = None
+    try:
+        import open3d as o3d
 
-    if args.mode != "points":
-        try:
-            mesh = mesh.simplify_quadric_decimation(args.faces)
-        except Exception:
-            pass
-        mesh.compute_vertex_normals()
+        mesh = o3d.io.read_triangle_mesh(args.mesh)
+        if mesh.is_empty():
+            raise RuntimeError("Mesh is empty.")
+        use_open3d = True
+    except Exception:
+        use_open3d = False
+
+    if use_open3d:
+        if args.mode != "points":
+            try:
+                mesh = mesh.simplify_quadric_decimation(args.faces)
+            except Exception:
+                pass
+            mesh.compute_vertex_normals()
+        verts = np.asarray(mesh.vertices)
+        tris = np.asarray(mesh.triangles)
+        normals = np.asarray(mesh.vertex_normals) if args.mode != "points" else None
+    else:
+        verts, tris = _load_ply_ascii(Path(args.mesh))
+        normals = None
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -58,16 +105,16 @@ def main() -> None:
     ax.set_axis_off()
 
     if args.mode == "points":
-        pcd = mesh.sample_points_uniformly(number_of_points=args.points)
-        pts = np.asarray(pcd.points)
+        if use_open3d and mesh is not None:
+            pcd = mesh.sample_points_uniformly(number_of_points=args.points)
+            pts = np.asarray(pcd.points)
+        else:
+            pts = verts
         center = pts.mean(axis=0)
         pts_centered = pts - center
         scale = np.max(np.linalg.norm(pts_centered, axis=1))
         pts_centered /= max(scale, 1e-6)
     else:
-        verts = np.asarray(mesh.vertices)
-        tris = np.asarray(mesh.triangles)
-        normals = np.asarray(mesh.vertex_normals)
         center = verts.mean(axis=0)
         verts_centered = verts - center
         scale = np.max(np.linalg.norm(verts_centered, axis=1))
@@ -100,11 +147,17 @@ def main() -> None:
                 dtype=np.float32,
             )
             v_rot = verts_centered @ rot.T
-            n_rot = _normalize(normals @ rot.T)
 
             tri_verts = v_rot[tris]
-            tri_norms = n_rot[tris]
-            intensity = np.clip((tri_norms @ light_dir).mean(axis=1), 0.1, 1.0)
+            if normals is not None:
+                n_rot = _normalize(normals @ rot.T)
+                tri_norms = n_rot[tris]
+                intensity = np.clip((tri_norms @ light_dir).mean(axis=1), 0.1, 1.0)
+            else:
+                tri_norms = np.cross(tri_verts[:, 1] - tri_verts[:, 0], tri_verts[:, 2] - tri_verts[:, 0])
+                tri_norms = _normalize(tri_norms)
+                intensity = np.clip(tri_norms @ light_dir, 0.1, 1.0)
+
             cmap = plt.get_cmap("cividis")
             facecolors = cmap(intensity)
 
@@ -120,8 +173,13 @@ def main() -> None:
             ax.set_zlim(-1, 1)
 
         fig.canvas.draw()
-        img = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
-        img = img.reshape(height, width, 3)
+        if hasattr(fig.canvas, "buffer_rgba"):
+            img = np.asarray(fig.canvas.buffer_rgba())
+            img = img[:, :, :3]
+        else:
+            img = np.frombuffer(fig.canvas.tostring_argb(), dtype=np.uint8)
+            img = img.reshape(height, width, 4)
+            img = img[:, :, 1:4]
         img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
         writer.write(img_bgr)
 

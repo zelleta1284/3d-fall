@@ -60,3 +60,11 @@ risk:
     trip: 1.0
     slip: 0.8
     physics: 1.0
+
+patient:
+  age: 78
+  gender: female
+  fall_last_6_months: true
+  fall_hospitalized: false
+  can_get_out_of_bed: true
+  assistive_aid: true
