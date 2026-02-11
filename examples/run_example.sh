@@ -2,11 +2,10 @@
 set -euo pipefail
 
 if [[ $# -lt 1 ]]; then
-  echo "Usage: $0 /path/to/room.mp4"
-  exit 1
+  VIDEO="/Users/alextellez/Documents/New project/3d-fall/examples/surestep_example.mp4"
+else
+  VIDEO="$1"
 fi
-
-VIDEO="$1"
 WORKDIR="/tmp/surestep_example"
 CONFIG="/Users/alextellez/Documents/New project/3d-fall/examples/example_config.yaml"
 
@@ -16,4 +15,3 @@ CONFIG="/Users/alextellez/Documents/New project/3d-fall/examples/example_config.
   --config "$CONFIG" \
   --fps 2 \
   --auto-windows
-

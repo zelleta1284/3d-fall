@@ -27,7 +27,23 @@ pip install -r requirements.txt
 
 You also need COLMAP installed and in your PATH.
 
-### 2) Reconstruct a mesh from an .mp4
+### Included example video
+
+Use the bundled synthetic scan in `examples/surestep_example.mp4` to test the pipeline quickly.
+
+### 2) One-command run (recommended)
+
+```bash
+./scripts/run_all.py \
+  --video /path/to/room.mp4 \
+  --workdir /tmp/surestep_run \
+  --config /Users/alextellez/Documents/New\ project/3d-fall/config/example.yaml \
+  --auto-windows
+```
+
+### 3) Manual steps (for debugging)
+
+Reconstruct a mesh from an .mp4:
 
 ```bash
 ./scripts/run_pipeline.py --video /path/to/room.mp4 --workdir /tmp/room_recon --fps 2
@@ -38,13 +54,13 @@ Outputs:
 - `/tmp/room_recon/depth/*.png`
 - `/tmp/room_recon/colmap/*`
 
-### 3) Inspect mesh bounds
+### 4) Inspect mesh bounds
 
 ```bash
 ./scripts/inspect_mesh.py --mesh /tmp/room_recon/mesh.ply
 ```
 
-### 4) Calibrate scale (optional but recommended)
+### 5) Calibrate scale (optional but recommended)
 
 Pick two points in the mesh and enter the real-world distance between them (meters). This rescales the mesh for more accurate risk estimates.
 
@@ -52,7 +68,7 @@ Pick two points in the mesh and enter the real-world distance between them (mete
 ./scripts/calibrate_scale.py --mesh /tmp/room_recon/mesh.ply --distance 3.2 --out /tmp/room_recon/mesh_scaled.ply
 ```
 
-### 5) Detect windows (optional helper)
+### 6) Detect windows (optional helper)
 
 ```bash
 ./scripts/detect_windows.py --mesh /tmp/room_recon/mesh_scaled.ply
@@ -60,7 +76,7 @@ Pick two points in the mesh and enter the real-world distance between them (mete
 
 Paste the output into the `lighting.windows` section of your config.
 
-### 6) Run the fall-risk heatmap
+### 7) Run the fall-risk heatmap
 
 Edit `config/example.yaml` to set path start/goal points, windows, and friction zones.
 
@@ -72,7 +88,7 @@ Outputs:
 - `/tmp/room_recon/risk/risk_heatmap.png`
 - `/tmp/room_recon/risk/risk_heatmap.npy`
 
-### 7) Generate a report (JSON + PDF)
+### 8) Generate a report (JSON + PDF)
 
 Use the mesh bounds output from `inspect_mesh.py` to fill `--min-xy`.
 

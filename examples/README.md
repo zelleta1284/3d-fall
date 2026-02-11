@@ -1,12 +1,20 @@
 # SureStep.ai examples
 
-These examples assume you have a local .mp4 scan of a room. The pipeline works from video frames.
+This folder includes a small synthetic room scan video you can use directly:
+
+- `examples/surestep_example.mp4`
+
+To regenerate the synthetic video:
+
+```bash
+../scripts/generate_example_video.py --out /Users/alextellez/Documents/New\ project/3d-fall/examples/surestep_example.mp4
+```
 
 ## End-to-end run (single command)
 
 ```bash
 ../scripts/run_all.py \
-  --video /path/to/room.mp4 \
+  --video /Users/alextellez/Documents/New\ project/3d-fall/examples/surestep_example.mp4 \
   --workdir /tmp/surestep_example \
   --config /Users/alextellez/Documents/New\ project/3d-fall/examples/example_config.yaml \
   --fps 2 \
@@ -19,7 +27,7 @@ If you know a real-world distance in the room, run with `--scale-distance` and o
 
 ```bash
 ../scripts/run_all.py \
-  --video /path/to/room.mp4 \
+  --video /Users/alextellez/Documents/New\ project/3d-fall/examples/surestep_example.mp4 \
   --workdir /tmp/surestep_example \
   --config /Users/alextellez/Documents/New\ project/3d-fall/examples/example_config.yaml \
   --scale-distance 3.2 \
