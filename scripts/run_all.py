@@ -206,7 +206,19 @@ def main() -> None:
         from subprocess import run
         render_script = ROOT / "scripts" / "render_mesh_video.py"
         mesh_video = workdir / "mesh_preview.mp4"
-        run([str(render_script), "--mesh", str(final_mesh), "--out", str(mesh_video)], check=True)
+        run(
+            [
+                str(render_script),
+                "--mesh",
+                str(final_mesh),
+                "--out",
+                str(mesh_video),
+                "--mode",
+                "surface",
+                "--wireframe",
+            ],
+            check=True,
+        )
 
     print("Done. Outputs:")
     print(f"- Mesh: {final_mesh}")

@@ -5,6 +5,12 @@ from pathlib import Path
 import numpy as np
 
 
+def _normalize(v: np.ndarray) -> np.ndarray:
+    n = np.linalg.norm(v, axis=-1, keepdims=True)
+    n = np.where(n < 1e-6, 1.0, n)
+    return v / n
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Render a rotating mesh preview video.")
     parser.add_argument("--mesh", required=True, help="Path to mesh.ply")
@@ -12,6 +18,9 @@ def main() -> None:
     parser.add_argument("--frames", type=int, default=180)
     parser.add_argument("--fps", type=int, default=24)
     parser.add_argument("--points", type=int, default=30000)
+    parser.add_argument("--faces", type=int, default=40000, help="Target face count for simplification")
+    parser.add_argument("--mode", choices=["surface", "wireframe", "points"], default="surface")
+    parser.add_argument("--wireframe", action="store_true", help="Overlay wireframe edges")
     args = parser.parse_args()
 
     import open3d as o3d
@@ -20,13 +29,18 @@ def main() -> None:
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     import cv2
+    from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
     mesh = o3d.io.read_triangle_mesh(args.mesh)
     if mesh.is_empty():
         raise RuntimeError("Mesh is empty.")
 
-    pcd = mesh.sample_points_uniformly(number_of_points=args.points)
-    pts = np.asarray(pcd.points)
+    if args.mode != "points":
+        try:
+            mesh = mesh.simplify_quadric_decimation(args.faces)
+        except Exception:
+            pass
+        mesh.compute_vertex_normals()
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -37,34 +51,73 @@ def main() -> None:
     if not writer.isOpened():
         raise RuntimeError("Failed to open VideoWriter")
 
-    # Normalize for view
-    center = pts.mean(axis=0)
-    pts_centered = pts - center
-    scale = np.max(np.linalg.norm(pts_centered, axis=1))
-    pts_centered /= max(scale, 1e-6)
-
     fig = plt.figure(figsize=(width / 100, height / 100), dpi=100)
     ax = fig.add_subplot(111, projection="3d")
-    ax.set_facecolor((0, 0, 0))
-    fig.patch.set_facecolor((0, 0, 0))
+    ax.set_facecolor((0.02, 0.03, 0.04))
+    fig.patch.set_facecolor((0.02, 0.03, 0.04))
     ax.set_axis_off()
+
+    if args.mode == "points":
+        pcd = mesh.sample_points_uniformly(number_of_points=args.points)
+        pts = np.asarray(pcd.points)
+        center = pts.mean(axis=0)
+        pts_centered = pts - center
+        scale = np.max(np.linalg.norm(pts_centered, axis=1))
+        pts_centered /= max(scale, 1e-6)
+    else:
+        verts = np.asarray(mesh.vertices)
+        tris = np.asarray(mesh.triangles)
+        normals = np.asarray(mesh.vertex_normals)
+        center = verts.mean(axis=0)
+        verts_centered = verts - center
+        scale = np.max(np.linalg.norm(verts_centered, axis=1))
+        verts_centered /= max(scale, 1e-6)
+        light_dir = _normalize(np.array([0.6, 0.2, 0.7], dtype=np.float32))
 
     for i in range(args.frames):
         ax.clear()
         ax.set_axis_off()
         az = 360 * (i / max(args.frames - 1, 1))
-        ax.view_init(elev=15, azim=az)
-        ax.scatter(
-            pts_centered[:, 0],
-            pts_centered[:, 1],
-            pts_centered[:, 2],
-            s=0.2,
-            c="#c7d5e0",
-            alpha=0.8,
-        )
-        ax.set_xlim(-1, 1)
-        ax.set_ylim(-1, 1)
-        ax.set_zlim(-1, 1)
+        ax.view_init(elev=18, azim=az)
+
+        if args.mode == "points":
+            ax.scatter(
+                pts_centered[:, 0],
+                pts_centered[:, 1],
+                pts_centered[:, 2],
+                s=0.2,
+                c="#c7d5e0",
+                alpha=0.8,
+            )
+        else:
+            theta = np.deg2rad(az)
+            rot = np.array(
+                [
+                    [np.cos(theta), -np.sin(theta), 0.0],
+                    [np.sin(theta), np.cos(theta), 0.0],
+                    [0.0, 0.0, 1.0],
+                ],
+                dtype=np.float32,
+            )
+            v_rot = verts_centered @ rot.T
+            n_rot = _normalize(normals @ rot.T)
+
+            tri_verts = v_rot[tris]
+            tri_norms = n_rot[tris]
+            intensity = np.clip((tri_norms @ light_dir).mean(axis=1), 0.1, 1.0)
+            cmap = plt.get_cmap("cividis")
+            facecolors = cmap(intensity)
+
+            collection = Poly3DCollection(tri_verts, facecolors=facecolors, linewidths=0.1)
+            if args.mode == "wireframe" or args.wireframe:
+                collection.set_edgecolor((0.2, 0.25, 0.3, 0.5))
+            else:
+                collection.set_edgecolor((0, 0, 0, 0))
+
+            ax.add_collection3d(collection)
+            ax.set_xlim(-1, 1)
+            ax.set_ylim(-1, 1)
+            ax.set_zlim(-1, 1)
 
         fig.canvas.draw()
         img = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)

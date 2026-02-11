@@ -41,7 +41,7 @@ Use the bundled synthetic scan in `examples/surestep_example.mp4` to test the pi
   --auto-windows
 ```
 
-This also generates a mesh preview video (`mesh_preview.mp4`) so users can see the reconstructed geometry.
+This also generates a mesh preview video (`mesh_preview.mp4`) with shaded surfaces and optional wireframe overlay so users can see the reconstructed geometry.
 
 ### 3) Manual steps (for debugging)
 
