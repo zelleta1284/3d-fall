@@ -378,6 +378,7 @@ def _process_room(
         "room_name": patient_input.get("room_name") if isinstance(patient_input, dict) else room_name,
         "room_interpretation": interpretation.get("room", interpretation),
         "risk_summary": risk_summary,
+        "explanation_text": risk_summary.get("explanation_text", ""),
         "mitigations": _suggest_dme(room_name, patient_input if isinstance(patient_input, dict) else {}, interpretation),
         "outputs": {
             "mesh_ply": str(final_mesh),
