@@ -238,6 +238,17 @@ def _risk_narrative(risk_summary: Dict[str, Any]) -> str:
     )
 
 
+def _risk_explanation_text(risk_summary: Dict[str, Any]) -> str:
+    return (
+        "How to read this: overall_risk_score compares the average floor risk to the worst hotspots "
+        "(0 = very low overall, 1 = average as risky as the worst spot). "
+        "p95 and p99 are thresholds for the highest-risk 5% and 1% of floor cells. "
+        "coverage.above_p95/above_p99 tell what share of the room falls into those high-risk bands. "
+        "components break total risk into causes (obstacle, trip, slip, turn, glare, physics). "
+        "dominant_factors lists the top contributors, and hotspots are the specific coordinates of highest risk."
+    )
+
+
 def _process_room(
     args: argparse.Namespace,
     video_path: Path,
@@ -359,6 +370,7 @@ def _process_room(
         risk_summary = _risk_summary(heat, min_xy, grid_size)
 
     risk_summary["narrative"] = _risk_narrative(risk_summary)
+    risk_summary["explanation_text"] = _risk_explanation_text(risk_summary)
 
     room_output = {
         "patient_input": patient_input,
