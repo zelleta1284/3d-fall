@@ -149,7 +149,8 @@ def estimate_depth_midas(
 
     for img_path in tqdm(image_paths, desc="Depth"):
         img = Image.open(img_path).convert("RGB")
-        input_batch = transform(img).to(device)
+        img_np = np.array(img)
+        input_batch = transform(img_np).to(device)
 
         with torch.no_grad():
             prediction = midas(input_batch)

@@ -1,7 +1,9 @@
 from dataclasses import dataclass
+from pathlib import Path
 from typing import List, Tuple
 
 import numpy as np
+import tempfile
 
 
 @dataclass
@@ -44,7 +46,29 @@ def physics_collision_risk(
     p.setGravity(0, 0, -9.81)
     p.setTimeStep(spec.timestep)
 
-    mesh_collision = p.createCollisionShape(p.GEOM_MESH, fileName=mesh_path, flags=p.GEOM_FORCE_CONCAVE_TRIMESH)
+    temp_dir = None
+    mesh_collision_path = mesh_path
+    try:
+        if Path(mesh_path).suffix.lower() != ".obj":
+            try:
+                import open3d as o3d
+            except Exception as exc:  # pragma: no cover - best effort
+                raise RuntimeError("Open3D required to convert mesh for PyBullet") from exc
+            temp_dir = tempfile.TemporaryDirectory()
+            mesh_collision_path = str(Path(temp_dir.name) / "mesh_for_pybullet.obj")
+            mesh = o3d.io.read_triangle_mesh(mesh_path)
+            if mesh.is_empty():
+                raise RuntimeError("Mesh is empty; cannot simulate physics")
+            o3d.io.write_triangle_mesh(mesh_collision_path, mesh, write_ascii=False)
+
+        mesh_collision = p.createCollisionShape(
+            p.GEOM_MESH,
+            fileName=mesh_collision_path,
+            flags=p.GEOM_FORCE_CONCAVE_TRIMESH,
+        )
+    finally:
+        if temp_dir:
+            temp_dir.cleanup()
     mesh_id = p.createMultiBody(baseMass=0, baseCollisionShapeIndex=mesh_collision)
     p.changeDynamics(mesh_id, -1, lateralFriction=spec.floor_friction)
 
