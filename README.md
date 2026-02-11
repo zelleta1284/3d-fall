@@ -18,8 +18,6 @@ Provide a JSON/YAML payload with:
 - `can_get_out_of_bed` (true/false)
 - `assistive_aid` (true/false)
 
-### Keragon POST payload
-If you ingest through Keragon, save the POST body as JSON and pass it to `--keragon`. The payload should include `intake` and a `rooms` list with `video_path` and optional `config_path`. See `examples/keragon_payload_example.json`.
 
 ## What this does
 
