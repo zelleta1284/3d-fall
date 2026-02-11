@@ -1,0 +1,57 @@
+room:
+  grid_size_m: 0.05
+  obstacle_height_m: 0.2
+  default_friction: 0.6
+  friction_zones:
+    - rect: [1.0, 0.5, 2.0, 1.2]
+      mu: 0.3
+
+paths:
+  - start: [0.0, 0.0]
+    goal: [3.0, 2.0]
+    count: 2000
+
+gait:
+  step_length: 0.5
+  turn_radius: 0.6
+  lateral_std: 0.05
+  speed_mps: 0.7
+
+biomechanics:
+  foot_clearance_m: 0.03
+  cane: true
+  shuffle_bias: 0.3
+  reaction_time_s: 0.7
+
+lighting:
+  latitude: 37.7749
+  longitude: -122.4194
+  timezone_offset_hours: -8
+  datetime_iso: "2026-02-11T16:00:00"
+  glare_weight: 1.0
+  ambient_weight: 0.3
+  windows: []
+  lights:
+    - position: [1.0, 1.0, 2.2]
+      intensity: 1.0
+      range_m: 3.0
+
+physics:
+  enabled: true
+  timestep: 0.02
+  steps_per_point: 5
+  body_radius: 0.2
+  body_height: 1.2
+  mass_kg: 70.0
+  floor_friction: 0.6
+  use_gui: false
+
+risk:
+  obstacle_distance_m: 0.4
+  weights:
+    obstacle: 1.0
+    turn: 0.5
+    glare: 0.8
+    trip: 1.0
+    slip: 0.8
+    physics: 1.0
