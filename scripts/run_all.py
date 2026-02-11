@@ -211,6 +211,33 @@ def _suggest_dme(room_name: str | None, patient: Dict[str, Any], interpretation:
     return suggestions
 
 
+def _risk_narrative(risk_summary: Dict[str, Any]) -> str:
+    overall = risk_summary.get("overall_risk_score", 0.0)
+    p95 = risk_summary.get("p95", 0.0)
+    p99 = risk_summary.get("p99", 0.0)
+    coverage = risk_summary.get("coverage", {})
+    above_p95 = coverage.get("above_p95", 0.0)
+    above_p99 = coverage.get("above_p99", 0.0)
+    dominant = risk_summary.get("dominant_factors", [])
+
+    if overall < 0.25:
+        level = "low"
+    elif overall < 0.55:
+        level = "moderate"
+    else:
+        level = "high"
+
+    dominant_text = ", ".join([f"{d['factor']} ({int(d['share']*100)}%)" for d in dominant]) if dominant else "unknown factors"
+
+    return (
+        f"Overall risk in this room is {level} (score {overall:.2f}). "
+        f"Risk is concentrated in small areas: top 5% of floor cells have risk >= {p95:.2f}, "
+        f"top 1% >= {p99:.2f}. Approximately {above_p95*100:.1f}% of cells exceed p95 and "
+        f"{above_p99*100:.1f}% exceed p99. "
+        f"Dominant contributors: {dominant_text}."
+    )
+
+
 def _process_room(
     args: argparse.Namespace,
     video_path: Path,
@@ -330,6 +357,8 @@ def _process_room(
         risk_summary = _load_config(risk_summary_path)
     else:
         risk_summary = _risk_summary(heat, min_xy, grid_size)
+
+    risk_summary["narrative"] = _risk_narrative(risk_summary)
 
     room_output = {
         "patient_input": patient_input,
