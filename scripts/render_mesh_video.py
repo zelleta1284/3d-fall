@@ -154,8 +154,9 @@ def main() -> None:
                 tri_norm = _normalize(np.cross(a, b))
 
             intensity = float(np.clip(np.dot(tri_norm, light_dir), 0.1, 1.0))
-            base = np.array([70, 110, 140], dtype=np.float32)
-            color = np.clip(base * intensity + 30, 0, 255).astype(np.uint8)
+            base = np.array([140, 170, 200], dtype=np.float32)
+            # Brighter base+offset keeps dim meshes visible even when normals face away from the light.
+            color = np.clip(base * intensity + 60, 0, 255).astype(np.uint8)
 
             tri2d = tri[:, :2]
             _draw_triangle(img, tri2d, color, args.wireframe)
