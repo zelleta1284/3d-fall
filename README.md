@@ -41,6 +41,8 @@ Use the bundled synthetic scan in `examples/surestep_example.mp4` to test the pi
   --auto-windows
 ```
 
+This also generates a mesh preview video (`mesh_preview.mp4`) so users can see the reconstructed geometry.
+
 ### 3) Manual steps (for debugging)
 
 Reconstruct a mesh from an .mp4:
@@ -87,6 +89,7 @@ Edit `config/example.yaml` to set path start/goal points, windows, and friction 
 Outputs:
 - `/tmp/room_recon/risk/risk_heatmap.png`
 - `/tmp/room_recon/risk/risk_heatmap.npy`
+ - `/tmp/surestep_run/mesh_preview.mp4`
 
 ### 8) Generate a report (JSON + PDF)
 
@@ -120,4 +123,6 @@ Use the mesh bounds output from `inspect_mesh.py` to fill `--min-xy`.
 - `scripts/calibrate_scale.py`: mesh scaling helper
 - `scripts/detect_windows.py`: window detection helper
 - `scripts/generate_report.py`: report generator
+- `scripts/render_mesh_video.py`: mesh preview video
+- `scripts/run_all.py`: end-to-end pipeline
 - `config/example.yaml`: example config

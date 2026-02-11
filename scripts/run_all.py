@@ -154,6 +154,7 @@ def main() -> None:
     parser.add_argument("--scale-distance", type=float, default=None, help="Known distance in meters")
     parser.add_argument("--picked", help="picked_points.json path for scaling")
     parser.add_argument("--auto-windows", action="store_true", help="Auto-detect windows and update config copy")
+    parser.add_argument("--no-mesh-video", action="store_true", help="Skip mesh preview video")
     args = parser.parse_args()
 
     workdir = Path(args.workdir)
@@ -200,6 +201,12 @@ def main() -> None:
     heatmap_path = risk_dir / "risk_heatmap.npy"
     report_dir = workdir / "report"
     _make_report(heatmap_path, config_out, final_mesh, report_dir)
+
+    if not args.no_mesh_video:
+        from subprocess import run
+        render_script = ROOT / "scripts" / "render_mesh_video.py"
+        mesh_video = workdir / "mesh_preview.mp4"
+        run([str(render_script), "--mesh", str(final_mesh), "--out", str(mesh_video)], check=True)
 
     print("Done. Outputs:")
     print(f"- Mesh: {final_mesh}")
