@@ -1,0 +1,32 @@
+{
+  "intake": {
+    "age": 78,
+    "gender": "female",
+    "fall_last_6_months": true,
+    "fall_hospitalized": false,
+    "can_get_out_of_bed": true,
+    "assistive_aid": true
+  },
+  "rooms": [
+    {
+      "name": "living",
+      "video_path": "/path/to/living_room.mp4",
+      "config_path": "/path/to/3d-fall/examples/example_config.yaml"
+    },
+    {
+      "name": "bedroom",
+      "video_path": "/path/to/bedroom.mp4",
+      "config_path": "/path/to/3d-fall/examples/example_config.yaml"
+    },
+    {
+      "name": "kitchen",
+      "video_path": "/path/to/kitchen.mp4",
+      "config_path": "/path/to/3d-fall/examples/example_config.yaml"
+    },
+    {
+      "name": "bathroom",
+      "video_path": "/path/to/bathroom.mp4",
+      "config_path": "/path/to/3d-fall/examples/example_config.yaml"
+    }
+  ]
+}

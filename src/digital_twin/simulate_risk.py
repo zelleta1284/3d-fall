@@ -442,6 +442,12 @@ def simulate_risk(mesh_path: Path, config_path: Path, out_dir: Path) -> Path:
         glare = glare_map(obstacle_grid.shape, min_xy, cfg.room.grid_size_m, floor_z, cfg.lighting)
 
     heat = np.zeros_like(dist_grid, dtype=np.float32)
+    comp_obstacle = np.zeros_like(dist_grid, dtype=np.float32)
+    comp_turn = np.zeros_like(dist_grid, dtype=np.float32)
+    comp_trip = np.zeros_like(dist_grid, dtype=np.float32)
+    comp_slip = np.zeros_like(dist_grid, dtype=np.float32)
+    comp_glare = np.zeros_like(dist_grid, dtype=np.float32)
+    comp_physics = np.zeros_like(dist_grid, dtype=np.float32)
     physics_paths: List[List[Tuple[int, int]]] = []
 
     clearance = cfg.biomechanics.foot_clearance_m * (1.0 - 0.5 * cfg.biomechanics.shuffle_bias)
@@ -484,6 +490,11 @@ def simulate_risk(mesh_path: Path, config_path: Path, out_dir: Path) -> Path:
                 slip_ratio = max(0.0, (a_lat - mu * 9.81) / max(mu * 9.81, 1e-6))
                 slip_risk = slip_ratio * (1.0 + turn_risk[i])
 
+                comp_obstacle[y, x] += cfg.risk.weights.obstacle * obstacle_risk * stability
+                comp_turn[y, x] += cfg.risk.weights.turn * turn_risk[i] * stability
+                comp_trip[y, x] += cfg.risk.weights.trip * trip_risk * stability
+                comp_slip[y, x] += cfg.risk.weights.slip * slip_risk * stability
+
                 heat[y, x] += (
                     cfg.risk.weights.obstacle * obstacle_risk
                     + cfg.risk.weights.turn * turn_risk[i]
@@ -501,8 +512,10 @@ def simulate_risk(mesh_path: Path, config_path: Path, out_dir: Path) -> Path:
             physics_paths,
             cfg.physics,
         )
+        comp_physics += cfg.risk.weights.physics * physics_risk
         heat += cfg.risk.weights.physics * physics_risk
 
+    comp_glare += cfg.risk.weights.glare * glare
     heat += cfg.risk.weights.glare * glare
 
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -511,6 +524,7 @@ def simulate_risk(mesh_path: Path, config_path: Path, out_dir: Path) -> Path:
 
     interpretation = {
         "room": {
+            "room_name": cfg.patient.get("room_name") if isinstance(cfg.patient, dict) else None,
             "floor_z_estimate_m": floor_z,
             "ceiling_z_estimate_m": ceil_z,
             "height_span_m": float(ceil_z - floor_z),
@@ -534,6 +548,81 @@ def simulate_risk(mesh_path: Path, config_path: Path, out_dir: Path) -> Path:
     interp_path = out_dir / "room_interpretation.json"
     with interp_path.open("w", encoding="utf-8") as f:
         json.dump(interpretation, f, indent=2)
+
+    patient_out = {
+        "patient": cfg.patient or {},
+        "patient_effects": patient_effects,
+        "room_name": cfg.patient.get("room_name") if isinstance(cfg.patient, dict) else None,
+    }
+    patient_path = out_dir / "patient_inference.json"
+    with patient_path.open("w", encoding="utf-8") as f:
+        json.dump(patient_out, f, indent=2)
+
+    # Risk summary breakdown
+    def _component_stats(name: str, comp: np.ndarray) -> Dict[str, float]:
+        if comp.size == 0:
+            return {"mean": 0.0, "p95": 0.0, "sum": 0.0}
+        return {
+            "mean": float(np.mean(comp)),
+            "p95": float(np.percentile(comp, 95)),
+            "sum": float(np.sum(comp)),
+        }
+
+    total = float(np.sum(heat)) if np.any(heat) else 0.0
+    component_stats = {
+        "obstacle": _component_stats("obstacle", comp_obstacle),
+        "turn": _component_stats("turn", comp_turn),
+        "trip": _component_stats("trip", comp_trip),
+        "slip": _component_stats("slip", comp_slip),
+        "glare": _component_stats("glare", comp_glare),
+        "physics": _component_stats("physics", comp_physics),
+    }
+    for key, stats in component_stats.items():
+        stats["share"] = float(stats["sum"] / total) if total > 0 else 0.0
+
+    dominant = sorted(component_stats.items(), key=lambda kv: kv[1]["share"], reverse=True)
+    dominant = [{"factor": k, "share": v["share"]} for k, v in dominant[:3]]
+
+    # Hotspots in world coords
+    hotspots = []
+    if heat.size > 0:
+        flat = heat.flatten()
+        k = min(5, flat.size)
+        idx = np.argpartition(-flat, k - 1)[:k]
+        h, w = heat.shape
+        for i in idx:
+            y = int(i // w)
+            x = int(i % w)
+            hotspots.append(
+                {
+                    "position": [
+                        float(min_xy[0] + x * cfg.room.grid_size_m),
+                        float(min_xy[1] + y * cfg.room.grid_size_m),
+                    ],
+                    "score": float(heat[y, x]),
+                }
+            )
+        hotspots.sort(key=lambda r: r["score"], reverse=True)
+
+    coverage = {
+        "above_p95": float(np.mean(heat > np.percentile(heat, 95))) if np.any(heat) else 0.0,
+        "above_p99": float(np.mean(heat > np.percentile(heat, 99))) if np.any(heat) else 0.0,
+    }
+
+    risk_summary = {
+        "overall_risk_score": float(np.clip(np.mean(heat) / max(np.percentile(heat, 99), 1e-6), 0.0, 1.0))
+        if np.any(heat)
+        else 0.0,
+        "p95": float(np.percentile(heat, 95)) if np.any(heat) else 0.0,
+        "p99": float(np.percentile(heat, 99)) if np.any(heat) else 0.0,
+        "hotspots": hotspots,
+        "coverage": coverage,
+        "components": component_stats,
+        "dominant_factors": dominant,
+    }
+    risk_summary_path = out_dir / "risk_summary.json"
+    with risk_summary_path.open("w", encoding="utf-8") as f:
+        json.dump(risk_summary, f, indent=2)
 
     # Normalize for visualization
     max_val = np.percentile(heat, 99) if np.any(heat) else 1.0

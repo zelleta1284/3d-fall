@@ -10,7 +10,6 @@ sys.path.insert(0, str(ROOT / "src"))
 
 import numpy as np
 import yaml
-import open3d as o3d
 
 from digital_twin.pipeline import run_pipeline
 from digital_twin.simulate_risk import build_grids, load_mesh_vertices, simulate_risk
@@ -24,6 +23,11 @@ def _ensure_dir(path: Path) -> None:
 
 
 def _scale_mesh(mesh_path: Path, distance_m: float, picked_path: Path | None, out_path: Path) -> Path:
+    try:
+        import open3d as o3d
+    except Exception as exc:
+        raise RuntimeError("Open3D is required for interactive scaling but is not installed.") from exc
+
     mesh = o3d.io.read_triangle_mesh(str(mesh_path))
     if mesh.is_empty():
         raise RuntimeError("Mesh is empty.")
@@ -154,27 +158,71 @@ def _make_report(
     print(f"JSON report written to: {json_path}")
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="SureStep.ai end-to-end pipeline")
-    parser.add_argument("--video", required=True, help="Path to input .mp4")
-    parser.add_argument("--workdir", required=True, help="Working directory for outputs")
-    parser.add_argument("--config", required=True, help="Path to YAML config")
-    parser.add_argument("--intake", help="Path to intake JSON/YAML")
-    parser.add_argument("--fps", type=float, default=2.0, help="Frames per second to sample")
-    parser.add_argument("--median-depth-m", type=float, default=2.5)
-    parser.add_argument("--scale-distance", type=float, default=None, help="Known distance in meters")
-    parser.add_argument("--picked", help="picked_points.json path for scaling")
-    parser.add_argument("--auto-windows", action="store_true", help="Auto-detect windows and update config copy")
-    parser.add_argument("--auto-scale", dest="auto_scale", action="store_true", default=True, help="Auto-scale mesh using priors (default)")
-    parser.add_argument("--no-auto-scale", dest="auto_scale", action="store_false", help="Disable auto-scale priors")
-    parser.add_argument("--no-mesh-video", action="store_true", help="Skip mesh preview video")
-    args = parser.parse_args()
+def _risk_summary(heat: np.ndarray, min_xy: np.ndarray, grid_size: float) -> Dict[str, Any]:
+    if heat.size == 0:
+        return {"overall_risk_score": 0.0, "hotspots": []}
 
-    workdir = Path(args.workdir)
+    max_val = np.percentile(heat, 99) if np.any(heat) else 1.0
+    overall = float(np.clip(np.mean(heat) / max(max_val, 1e-6), 0.0, 1.0))
+    p95 = float(np.percentile(heat, 95))
+    p99 = float(np.percentile(heat, 99))
+    hotspots = compute_hotspots(heat, min_xy, grid_size, k=5)
+    return {
+        "overall_risk_score": overall,
+        "p95": p95,
+        "p99": p99,
+        "hotspots": [
+            {"position": [h.position[0], h.position[1]], "score": h.score} for h in hotspots
+        ],
+    }
+
+
+def _suggest_dme(room_name: str | None, patient: Dict[str, Any], interpretation: Dict[str, Any]) -> List[Dict[str, str]]:
+    room = (room_name or "").lower()
+    suggestions: List[Dict[str, str]] = []
+
+    def add(item: str, reason: str) -> None:
+        suggestions.append({"item": item, "reason": reason})
+
+    if room == "bathroom":
+        add("Grab bars (toilet + shower)", "Bathroom is a high-risk slip area.")
+        add("Non-slip shower mat", "Reduces slip risk on wet surfaces.")
+        add("Raised toilet seat", "Improves transfer stability.")
+        add("Shower chair", "Supports balance during bathing.")
+    elif room == "bedroom":
+        add("Bed rail", "Supports safer transfers in/out of bed.")
+        add("Night light or motion light", "Improves visibility for night trips.")
+        add("Remove/secure loose rugs", "Reduces trip risk near bed path.")
+    elif room == "kitchen":
+        add("Anti-slip floor mat with beveled edges", "Reduces slip and trip risk.")
+        add("Reacher/grabber tool", "Avoids overreaching and instability.")
+        add("Declutter walk paths", "Reduces obstacle/trip risk.")
+    else:
+        add("Secure rugs or remove them", "Common fall source in living areas.")
+        add("Increase ambient lighting", "Improves visibility and contrast.")
+        add("Reposition low furniture", "Reduces collision/turning risk.")
+
+    if patient.get("assistive_aid") is False and patient.get("fall_last_6_months") is True:
+        add("Assistive aid assessment (cane/walker)", "Recent fall history without aid.")
+
+    if patient.get("can_get_out_of_bed") is False:
+        add("Bed transfer assist device", "Improves stability during transfers.")
+
+    return suggestions
+
+
+def _process_room(
+    args: argparse.Namespace,
+    video_path: Path,
+    config_path: Path,
+    workdir: Path,
+    intake_payload: Dict[str, Any] | None,
+    room_name: str | None,
+) -> None:
     _ensure_dir(workdir)
 
     mesh_path = run_pipeline(
-        video_path=Path(args.video),
+        video_path=video_path,
         work_dir=workdir,
         fps=args.fps,
         median_depth_m=args.median_depth_m,
@@ -202,9 +250,14 @@ def main() -> None:
         except Exception as exc:
             print(f"Auto-scale skipped: {exc}")
 
-    config_src = Path(args.config)
     config_out = workdir / "config_used.yaml"
-    cfg = _load_config(config_src)
+    cfg = _load_config(config_path)
+    if intake_payload and isinstance(intake_payload, dict):
+        cfg.setdefault("patient", {})
+        cfg["patient"].update(intake_payload)
+    if room_name:
+        cfg.setdefault("patient", {})
+        cfg["patient"]["room_name"] = room_name
     if args.intake:
         intake_path = Path(args.intake)
         intake = _load_config(intake_path)
@@ -241,6 +294,7 @@ def main() -> None:
 
     if not args.no_mesh_video:
         from subprocess import run
+
         render_script = ROOT / "scripts" / "render_mesh_video.py"
         mesh_video = workdir / "mesh_preview.mp4"
         run(
@@ -250,18 +304,134 @@ def main() -> None:
                 str(final_mesh),
                 "--out",
                 str(mesh_video),
-                "--mode",
-                "surface",
                 "--wireframe",
             ],
             check=True,
         )
 
+    # Room-level JSON output
+    heat = np.load(heatmap_path)
+    cfg = _load_config(config_out)
+    grid_size = float(cfg.get("room", {}).get("grid_size_m", 0.05))
+    vertices = load_mesh_vertices(final_mesh)
+    _, _, min_xy, _ = build_grids(
+        vertices,
+        grid_size,
+        float(cfg.get("room", {}).get("obstacle_height_m", 0.2)),
+    )
+    interp_path = risk_dir / "room_interpretation.json"
+    patient_path = risk_dir / "patient_inference.json"
+    interpretation = _load_config(interp_path) if interp_path.exists() else {}
+    patient_inference = _load_config(patient_path) if patient_path.exists() else {}
+
+    patient_input = cfg.get("patient", {})
+    risk_summary_path = risk_dir / "risk_summary.json"
+    if risk_summary_path.exists():
+        risk_summary = _load_config(risk_summary_path)
+    else:
+        risk_summary = _risk_summary(heat, min_xy, grid_size)
+
+    room_output = {
+        "patient_input": patient_input,
+        "patient_inferences": patient_inference.get("patient_effects", {}),
+        "room_name": patient_input.get("room_name") if isinstance(patient_input, dict) else room_name,
+        "room_interpretation": interpretation.get("room", interpretation),
+        "risk_summary": risk_summary,
+        "mitigations": _suggest_dme(room_name, patient_input if isinstance(patient_input, dict) else {}, interpretation),
+        "outputs": {
+            "mesh_ply": str(final_mesh),
+            "mesh_preview_mp4": str(workdir / "mesh_preview.mp4"),
+            "heatmap_png": str(risk_dir / "risk_heatmap.png"),
+            "heatmap_npy": str(heatmap_path),
+            "room_interpretation_json": str(interp_path),
+            "patient_inference_json": str(patient_path),
+            "risk_summary_json": str(risk_summary_path),
+            "report_json": str(report_dir / "report.json"),
+        },
+    }
+
+    room_output_path = workdir / "room_output.json"
+    with room_output_path.open("w", encoding="utf-8") as f:
+        json.dump(room_output, f, indent=2)
+
     print("Done. Outputs:")
+    print(f"- Room: {room_name or 'unknown'}")
     print(f"- Mesh: {final_mesh}")
     print(f"- Config used: {config_out}")
     print(f"- Heatmap: {risk_dir / 'risk_heatmap.png'}")
     print(f"- Report: {report_dir}")
+    print(f"- Room JSON: {room_output_path}")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="SureStep.ai end-to-end pipeline")
+    parser.add_argument("--video", help="Path to input .mp4")
+    parser.add_argument("--workdir", required=True, help="Working directory for outputs")
+    parser.add_argument("--config", help="Path to YAML config")
+    parser.add_argument("--keragon", help="Path to Keragon POST payload (JSON/YAML)")
+    parser.add_argument("--room", help="Room name to select from Keragon payload")
+    parser.add_argument("--intake", help="Path to intake JSON/YAML")
+    parser.add_argument("--fps", type=float, default=2.0, help="Frames per second to sample")
+    parser.add_argument("--median-depth-m", type=float, default=2.5)
+    parser.add_argument("--scale-distance", type=float, default=None, help="Known distance in meters")
+    parser.add_argument("--picked", help="picked_points.json path for scaling")
+    parser.add_argument("--auto-windows", action="store_true", help="Auto-detect windows and update config copy")
+    parser.add_argument("--auto-scale", dest="auto_scale", action="store_true", default=True, help="Auto-scale mesh using priors (default)")
+    parser.add_argument("--no-auto-scale", dest="auto_scale", action="store_false", help="Disable auto-scale priors")
+    parser.add_argument("--no-mesh-video", action="store_true", help="Skip mesh preview video")
+    args = parser.parse_args()
+
+    if args.keragon:
+        payload = _load_config(Path(args.keragon))
+        if not isinstance(payload, dict):
+            raise RuntimeError("Keragon payload must be a JSON/YAML object")
+        rooms = payload.get("rooms", [])
+        intake_payload = payload.get("intake") or payload.get("patient")
+
+        selected_rooms = []
+        if args.room:
+            for room in rooms:
+                if room.get("name") == args.room:
+                    selected_rooms.append(room)
+                    break
+        else:
+            selected_rooms = rooms
+
+        if not selected_rooms:
+            raise RuntimeError("No rooms found in Keragon payload")
+
+        base_workdir = Path(args.workdir)
+        for idx, room in enumerate(selected_rooms, start=1):
+            room_name = room.get("name") or f"room_{idx}"
+            video = room.get("video_path") or room.get("video") or room.get("video_url")
+            config = room.get("config_path") or args.config
+            if not video:
+                raise RuntimeError(f"Missing video for room: {room_name}")
+            if not config:
+                raise RuntimeError(f"Missing config_path for room: {room_name}")
+            _process_room(
+                args=args,
+                video_path=Path(video),
+                config_path=Path(config),
+                workdir=base_workdir / room_name,
+                intake_payload=intake_payload if isinstance(intake_payload, dict) else None,
+                room_name=room_name,
+            )
+        return
+
+    if not args.video:
+        raise RuntimeError("--video is required unless --keragon provides room videos")
+    if not args.config:
+        raise RuntimeError("--config is required unless --keragon provides config_path")
+
+    _process_room(
+        args=args,
+        video_path=Path(args.video),
+        config_path=Path(args.config),
+        workdir=Path(args.workdir),
+        intake_payload=None,
+        room_name=args.room,
+    )
 
 
 if __name__ == "__main__":

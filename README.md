@@ -18,6 +18,9 @@ Provide a JSON/YAML payload with:
 - `can_get_out_of_bed` (true/false)
 - `assistive_aid` (true/false)
 
+### Keragon POST payload
+If you ingest through Keragon, save the POST body as JSON and pass it to `--keragon`. The payload should include `intake` and a `rooms` list with `video_path` and optional `config_path`. See `examples/keragon_payload_example.json`.
+
 ## What this does
 
 1) Extracts frames from a video.
@@ -51,7 +54,7 @@ Use the bundled synthetic scan in `examples/surestep_example.mp4` to test the pi
 ./scripts/run_all.py \
   --video /path/to/room.mp4 \
   --workdir /tmp/surestep_run \
-  --config /Users/alextellez/Documents/New\ project/3d-fall/config/example.yaml \
+  --config /path/to/3d-fall/config/example.yaml \
   --auto-windows
 ```
 
@@ -63,8 +66,18 @@ You can also pass a Jotform intake payload to include patient context:
 ./scripts/run_all.py \
   --video /path/to/room.mp4 \
   --workdir /tmp/surestep_run \
-  --config /Users/alextellez/Documents/New\ project/3d-fall/config/example.yaml \
-  --intake /Users/alextellez/Documents/New\ project/3d-fall/examples/intake_example.json \
+  --config /path/to/3d-fall/config/example.yaml \
+  --intake /path/to/3d-fall/examples/intake_example.json \
+  --auto-windows
+```
+
+Keragon payload example:
+
+```bash
+./scripts/run_all.py \
+  --keragon /path/to/3d-fall/examples/keragon_payload_example.json \
+  --room living \
+  --workdir /tmp/surestep_run \
   --auto-windows
 ```
 
@@ -118,8 +131,11 @@ Outputs:
 - `/tmp/room_recon/risk/risk_heatmap.png`
 - `/tmp/room_recon/risk/risk_heatmap.npy`
 - `/tmp/room_recon/risk/room_interpretation.json`
+- `/tmp/room_recon/risk/risk_summary.json`
 
 `room_interpretation.json` explains how the mesh was interpreted (floor/ceiling estimates, obstacle thresholds) and how intake inputs adjusted parameters.
+
+Each room run also produces a single JSON output at `/tmp/.../room_output.json` containing patient input, inferences, room risk summary, and DME-style mitigation suggestions.
 
 ### 8) Generate a report (JSON + PDF)
 
