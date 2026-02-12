@@ -123,6 +123,11 @@ When enabled, the run writes `semantic_hazards.npz` and `semantic_hazards.json` 
 
 If object detection stalls on Apple MPS, force CPU with `SURESTEP_DEVICE=cpu`.
 
+## Glare -> slip coupling
+
+By default, a portion of glare risk also contributes to slip risk (`risk.glare_slip_weight`).
+This keeps slip components non-zero when floors are visually glossy.
+
 ## Floor material inference (local CLIP)
 
 `run_all.py` can infer floor material from the video (polished hardwood, matte hardwood, tile, vinyl, carpet, concrete)

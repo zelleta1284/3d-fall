@@ -96,44 +96,44 @@
     "lighting_lights": 1
   },
   "risk_summary": {
-    "overall_risk_score": 0.7421449422836304,
-    "p95": 1.344697117805481,
-    "p99": 1.344697117805481,
+    "overall_risk_score": 0.6496420502662659,
+    "p95": 1.621335744857788,
+    "p99": 1.621335744857788,
     "hotspots": [
       {
         "position": [
           3.3160548133937384,
           -2.0381056869739487
         ],
-        "score": 1.344697117805481
+        "score": 1.621335744857788
       },
       {
         "position": [
           3.2260548133937386,
           -2.0381056869739487
         ],
-        "score": 1.344697117805481
+        "score": 1.621335744857788
       },
       {
         "position": [
           3.1660548133937385,
           -2.0981056869739487
         ],
-        "score": 1.344697117805481
+        "score": 1.621335744857788
       },
       {
         "position": [
           3.1960548133937383,
           -2.0981056869739487
         ],
-        "score": 1.344697117805481
+        "score": 1.621335744857788
       },
       {
         "position": [
           3.3460548133937387,
           -1.9781056869739486
         ],
-        "score": 1.344697117805481
+        "score": 1.621335744857788
       }
     ],
     "coverage": {
@@ -145,7 +145,7 @@
         "mean": 0.4701188802719116,
         "p95": 0.4850999712944031,
         "sum": 159.84042358398438,
-        "share": 0.47107981602378907
+        "share": 0.4463346901516736
       },
       "turn": {
         "mean": 0.0,
@@ -157,19 +157,19 @@
         "mean": 0.47754329442977905,
         "p95": 0.6081075072288513,
         "sum": 162.36471557617188,
-        "share": 0.4785193796873901
+        "share": 0.4533834645412971
       },
       "slip": {
-        "mean": 0.0,
-        "p95": 0.0,
-        "sum": 0.0,
-        "share": 0.0
+        "mean": 0.05532771721482277,
+        "p95": 0.27663856744766235,
+        "sum": 18.811424255371094,
+        "share": 0.05252858462253232
       },
       "glare": {
         "mean": 0.05029791593551636,
         "p95": 0.2514896094799042,
         "sum": 17.10129165649414,
-        "share": 0.05040072559040451
+        "share": 0.04775325003242491
       },
       "physics": {
         "mean": 0.0,
@@ -181,19 +181,19 @@
     "dominant_factors": [
       {
         "factor": "trip",
-        "share": 0.4785193796873901
+        "share": 0.4533834645412971
       },
       {
         "factor": "obstacle",
-        "share": 0.47107981602378907
+        "share": 0.4463346901516736
       },
       {
-        "factor": "glare",
-        "share": 0.05040072559040451
+        "factor": "slip",
+        "share": 0.05252858462253232
       }
     ],
-    "context_text": "Dominant hazards: trip (47% of total), obstacle (47% of total), glare (5% of total). Top hotspot near (3.32, -2.04). 0.0% of the floor exceeds the 95th percentile risk and 0.0% exceeds the 99th percentile.",
-    "narrative": "Overall risk in this room is high (score 0.74). Risk is concentrated in small areas: top 5% of floor cells have risk >= 1.34, top 1% >= 1.34. Approximately 0.0% of cells exceed p95 and 0.0% exceed p99. Dominant contributors: trip (47%), obstacle (47%), glare (5%).",
+    "context_text": "Dominant hazards: trip (45% of total), obstacle (44% of total), slip (5% of total). Top hotspot near (3.32, -2.04). 0.0% of the floor exceeds the 95th percentile risk and 0.0% exceeds the 99th percentile.",
+    "narrative": "Overall risk in this room is high (score 0.65). Risk is concentrated in small areas: top 5% of floor cells have risk >= 1.62, top 1% >= 1.62. Approximately 0.0% of cells exceed p95 and 0.0% exceed p99. Dominant contributors: trip (45%), obstacle (44%), slip (5%).",
     "explanation_text": "How to read this: overall_risk_score compares the average floor risk to the worst hotspots (0 = very low overall, 1 = average as risky as the worst spot). p95 and p99 are thresholds for the highest-risk 5% and 1% of floor cells. coverage.above_p95/above_p99 tell what share of the room falls into those high-risk bands. components break total risk into causes (obstacle, trip, slip, turn, glare, physics). dominant_factors lists the top contributors, and hotspots are the specific coordinates of highest risk. Semantic hazards (if enabled) inject object-detection cues into the obstacle/trip/turn components."
   },
   "explanation_text": "How to read this: overall_risk_score compares the average floor risk to the worst hotspots (0 = very low overall, 1 = average as risky as the worst spot). p95 and p99 are thresholds for the highest-risk 5% and 1% of floor cells. coverage.above_p95/above_p99 tell what share of the room falls into those high-risk bands. components break total risk into causes (obstacle, trip, slip, turn, glare, physics). dominant_factors lists the top contributors, and hotspots are the specific coordinates of highest risk. Semantic hazards (if enabled) inject object-detection cues into the obstacle/trip/turn components.",

@@ -52,6 +52,7 @@ class RiskSpec:
     coverage_weight: float
     semantic_hazards_path: Optional[str]
     semantic_weight: float
+    glare_slip_weight: float
 
 
 @dataclass
@@ -182,6 +183,7 @@ def load_config(path: Path) -> SimConfig:
         coverage_weight=_safe_float(risk_cfg.get("coverage_weight"), 0.25),
         semantic_hazards_path=risk_cfg.get("semantic_hazards_path"),
         semantic_weight=_safe_float(risk_cfg.get("semantic_weight"), 1.0),
+        glare_slip_weight=_safe_float(risk_cfg.get("glare_slip_weight"), 0.5),
     )
 
     patient = cfg.get("patient")
@@ -562,6 +564,11 @@ def simulate_risk(mesh_path: Path, config_path: Path, out_dir: Path) -> Path:
 
     comp_glare += cfg.risk.weights.glare * glare
     heat += cfg.risk.weights.glare * glare
+
+    if cfg.risk.glare_slip_weight > 0:
+        slip_from_glare = cfg.risk.glare_slip_weight * glare
+        comp_slip += cfg.risk.weights.slip * slip_from_glare
+        heat += cfg.risk.weights.slip * slip_from_glare
 
     semantic_path = Path(cfg.risk.semantic_hazards_path) if cfg.risk.semantic_hazards_path else None
     if semantic_path and semantic_path.exists():
