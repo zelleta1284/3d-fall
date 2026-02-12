@@ -9,6 +9,17 @@ import matplotlib.pyplot as plt
 import numpy as np
 import open3d as o3d
 
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from digital_twin.simulate_risk import (
+    a_star,
+    build_friction_grid,
+    build_grids,
+    compute_turn_risk,
+    load_config,
+    to_grid,
+)
+
 
 def _quaternion_to_matrix(q: np.ndarray) -> np.ndarray:
     qw, qx, qy, qz = q
@@ -133,21 +144,19 @@ def main() -> None:
     heatmap_path = risk_dir / "risk_heatmap.npy"
     room_interp = risk_dir / "room_interpretation.json"
     mesh_path = workdir / "mesh_scaled_auto.ply"
+    config_path = workdir / "config_used.yaml"
 
-    if not all(p.exists() for p in (heatmap_path, frames_dir, colmap_txt, mesh_path, room_interp)):
+    if not all(p.exists() for p in (heatmap_path, frames_dir, colmap_txt, mesh_path, room_interp, config_path)):
         raise RuntimeError("Missing required outputs in workdir.")
 
+    cfg = load_config(config_path)
     heatmap = np.load(heatmap_path)
-    interp = json.loads(room_interp.read_text(encoding="utf-8"))
-    grid_size = float(interp["room"]["grid_size_m"])
-    floor_z = float(interp["room"]["floor_z_estimate_m"])
-    mesh = cv2.imread if False else None  # no-op for lint
-    import open3d as o3d
-
-    mesh = o3d.io.read_triangle_mesh(str(mesh_path))
-    verts = np.asarray(mesh.vertices)
-    min_xyz = np.percentile(verts, 2, axis=0)
-    min_xy = min_xyz[:2]
+    obstacle_grid, height_grid, min_xy, floor_z = build_grids(
+        np.asarray(o3d.io.read_triangle_mesh(str(mesh_path)).vertices),
+        cfg.room.grid_size_m,
+        cfg.room.obstacle_height_m,
+    )
+    grid_size = cfg.room.grid_size_m
 
     h, w = heatmap.shape
     xs = min_xy[0] + (np.arange(w) + 0.5) * grid_size
@@ -175,7 +184,7 @@ def main() -> None:
             arr = comp_data[name].ravel()
             if not np.any(arr > 0):
                 continue
-            limit = max(np.percentile(arr, 99), arr.max(), 1e-6)
+            limit = max(np.percentile(arr, 95), arr.max(), 1e-6)
             norm_vals = arr / limit
             idx = np.argsort(norm_vals)[::-1]
             idx = idx[:per_layer]
@@ -183,7 +192,7 @@ def main() -> None:
                 {
                     "name": name,
                     "points": floor_pts[idx],
-                    "values": norm_vals[idx],
+                    "values": np.clip(norm_vals[idx], 0.0, 1.0),
                     "color": np.array(color, dtype=np.int32),
                 }
             )
@@ -198,6 +207,64 @@ def main() -> None:
         idx = np.argsort(norm)[::-1][: args.max_points]
         fallback_points = floor_pts[idx]
         fallback_values = norm[idx]
+
+    def grid_cells_to_world(indices: np.ndarray) -> np.ndarray:
+        if indices.size == 0:
+            return np.empty((0, 3), dtype=np.float32)
+        xs = min_xy[0] + (indices[:, 1] + 0.5) * grid_size
+        ys = min_xy[1] + (indices[:, 0] + 0.5) * grid_size
+        zs = np.full(xs.shape, floor_z, dtype=np.float32)
+        return np.column_stack([xs, ys, zs])
+
+    def add_layer(name: str, indices: np.ndarray, values: np.ndarray, color: Tuple[int, int, int]) -> None:
+        if indices.size == 0:
+            return
+        pts = grid_cells_to_world(indices)
+        component_layers.append({"name": name, "points": pts, "values": values, "color": np.array(color, dtype=np.int32)})
+
+    height_diff = height_grid - floor_z
+    obstacle_indices = np.column_stack(np.where(obstacle_grid == 1))
+    if obstacle_indices.size:
+        add_layer(
+            "obstacle",
+            obstacle_indices,
+            np.full(obstacle_indices.shape[0], 1.0, dtype=np.float32),
+            (0, 0, 255),
+        )
+
+    trip_threshold = cfg.biomechanics.foot_clearance_m * (1.0 - 0.5 * cfg.biomechanics.shuffle_bias)
+    trip_indices = np.column_stack(np.where(height_diff > trip_threshold))
+    if trip_indices.size:
+        add_layer(
+            "trip",
+            trip_indices,
+            np.clip(height_diff[trip_indices[:, 0], trip_indices[:, 1]] / (0.2 + trip_threshold), 0.0, 1.0),
+            (0, 255, 255),
+        )
+
+    friction_grid = build_friction_grid(cfg.room, obstacle_grid.shape, min_xy)
+    slip_indices = np.column_stack(np.where(friction_grid < cfg.room.default_friction - 0.05))
+    if slip_indices.size:
+        add_layer(
+            "slip",
+            slip_indices,
+            np.clip((cfg.room.default_friction - friction_grid[slip_indices[:, 0], slip_indices[:, 1]]) / 0.5, 0.0, 1.0),
+            (0, 150, 255),
+        )
+
+    for path_spec in cfg.paths:
+        start = to_grid(path_spec.start, min_xy, grid_size)
+        goal = to_grid(path_spec.goal, min_xy, grid_size)
+        path = np.array(a_star(obstacle_grid, start, goal))
+        if path.size == 0:
+            continue
+        risk = compute_turn_risk(path.tolist())
+        add_layer(
+            "turn",
+            path,
+            np.clip(risk, 0.0, 1.0),
+            (0, 255, 0),
+        )
 
     cameras = _parse_cameras_txt(colmap_txt / "cameras.txt")
     images = _parse_images_txt(colmap_txt / "images.txt")
@@ -257,7 +324,17 @@ def main() -> None:
                         green = int(200 * (1 - value) + 30)
                         color = (0, green, red)
                         cv2.circle(overlay, (u, v), radius, color, thickness=-1)
-        frame = cv2.addWeighted(overlay, args.alpha, frame, 1.0 - args.alpha, 0)
+                frame = cv2.addWeighted(overlay, args.alpha, frame, 1.0 - args.alpha, 0)
+        cv2.putText(
+            frame,
+            "SureStep Risk overlay",
+            (10, height - 30),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.65,
+            (255, 255, 255),
+            2,
+            cv2.LINE_AA,
+        )
         writer.write(frame)
         frame_idx += 1
 
