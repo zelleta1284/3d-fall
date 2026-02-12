@@ -388,11 +388,18 @@ def _process_room(
             )
             if result:
                 cfg.setdefault("room", {})
+                cfg["room"]["floor_glare_ratio"] = result.get("glare_ratio")
+                cfg.setdefault("room", {})
                 cfg["room"]["floor_material"] = result.get("label")
                 cfg["room"]["floor_material_confidence"] = result.get("confidence")
                 cfg["room"]["floor_material_applied"] = result.get("applied")
                 if result.get("applied"):
-                    cfg["room"]["default_friction"] = result.get("friction")
+                    friction = float(result.get("friction", cfg["room"].get("default_friction", 0.6)))
+                    glare_ratio = float(result.get("glare_ratio", 0.0))
+                    if glare_ratio >= args.floor_glare_threshold:
+                        friction *= args.floor_glare_friction_multiplier
+                        cfg["room"]["floor_glare_applied"] = True
+                    cfg["room"]["default_friction"] = friction
                 _save_config(config_out, cfg)
         except Exception as exc:
             print(f"Floor material inference skipped: {exc}")
@@ -563,6 +570,8 @@ def main() -> None:
     parser.add_argument("--floor-patch-size", type=int, default=192)
     parser.add_argument("--floor-patch-count", type=int, default=40)
     parser.add_argument("--floor-min-confidence", type=float, default=0.0)
+    parser.add_argument("--floor-glare-threshold", type=float, default=0.002)
+    parser.add_argument("--floor-glare-friction-multiplier", type=float, default=0.85)
     args = parser.parse_args()
 
     if args.keragon:

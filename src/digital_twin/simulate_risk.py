@@ -61,6 +61,10 @@ class RoomSpec:
     default_friction: float
     friction_zones: List[Dict]
     floor_material: Optional[str] = None
+    floor_material_confidence: Optional[float] = None
+    floor_material_applied: Optional[bool] = None
+    floor_glare_ratio: Optional[float] = None
+    floor_glare_applied: Optional[bool] = None
 
 
 @dataclass
@@ -111,6 +115,10 @@ def load_config(path: Path) -> SimConfig:
         default_friction=_safe_float(room_cfg.get("default_friction"), 0.6),
         friction_zones=room_cfg.get("friction_zones", []),
         floor_material=room_cfg.get("floor_material"),
+        floor_material_confidence=room_cfg.get("floor_material_confidence"),
+        floor_material_applied=room_cfg.get("floor_material_applied"),
+        floor_glare_ratio=room_cfg.get("floor_glare_ratio"),
+        floor_glare_applied=room_cfg.get("floor_glare_applied"),
     )
 
     lighting_cfg = cfg.get("lighting")
@@ -597,6 +605,10 @@ def simulate_risk(mesh_path: Path, config_path: Path, out_dir: Path) -> Path:
             "ceiling_z_estimate_m": ceil_z,
             "height_span_m": float(ceil_z - floor_z),
             "floor_material": cfg.room.floor_material,
+            "floor_material_confidence": cfg.room.floor_material_confidence,
+            "floor_material_applied": cfg.room.floor_material_applied,
+            "floor_glare_ratio": cfg.room.floor_glare_ratio,
+            "floor_glare_applied": cfg.room.floor_glare_applied,
             "default_friction": cfg.room.default_friction,
             "grid_size_m": cfg.room.grid_size_m,
             "obstacle_height_threshold_m": cfg.room.obstacle_height_m,

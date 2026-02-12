@@ -138,6 +138,8 @@ You can tune it with:
 --floor-patch-size 192
 --floor-patch-count 40
 --floor-min-confidence 0.0
+--floor-glare-threshold 0.002
+--floor-glare-friction-multiplier 0.85
 ```
 
 The run writes `floor_material.json` in the workdir.

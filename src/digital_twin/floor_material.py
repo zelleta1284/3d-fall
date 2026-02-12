@@ -33,8 +33,8 @@ class FloorMaterialConfig:
     patch_size: int = 192
     patch_count: int = 40
     min_confidence: float = 0.0
-    gloss_threshold: float = 0.05
-    gloss_boost: float = 0.1
+    glare_threshold: float = 0.02
+    glare_boost: float = 0.08
 
     def __post_init__(self) -> None:
         if self.friction_map is None:
@@ -258,18 +258,18 @@ def infer_floor_material(
 
     mean_probs = probs.mean(dim=0).cpu().numpy()
 
-    # Simple gloss heuristic: bright, low-saturation highlights often indicate polished surfaces.
-    gloss_ratios = []
+    # Simple glare heuristic: bright, low-saturation highlights often indicate polished surfaces.
+    glare_ratios = []
     for patch in patches:
         hsv = cv2.cvtColor(patch, cv2.COLOR_RGB2HSV)
         v = hsv[:, :, 2].astype(np.float32) / 255.0
         s = hsv[:, :, 1].astype(np.float32) / 255.0
-        gloss = np.mean((v > 0.9) & (s < 0.25))
-        gloss_ratios.append(gloss)
-    gloss_ratio = float(np.mean(gloss_ratios)) if gloss_ratios else 0.0
+        glare = np.mean((v > 0.9) & (s < 0.25))
+        glare_ratios.append(glare)
+    glare_ratio = float(np.mean(glare_ratios)) if glare_ratios else 0.0
 
-    if gloss_ratio > config.gloss_threshold:
-        boost = config.gloss_boost * min(2.0, gloss_ratio / max(config.gloss_threshold, 1e-6))
+    if glare_ratio > config.glare_threshold:
+        boost = config.glare_boost * min(2.0, glare_ratio / max(config.glare_threshold, 1e-6))
         labels = list(config.labels)
         if "polished hardwood" in labels:
             idx = labels.index("polished hardwood")
@@ -291,7 +291,7 @@ def infer_floor_material(
         "patches_used": len(patches),
         "floor_height_min_m": config.floor_height_min_m,
         "floor_height_max_m": config.floor_height_max_m,
-        "gloss_ratio": gloss_ratio,
+        "glare_ratio": glare_ratio,
     }
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
