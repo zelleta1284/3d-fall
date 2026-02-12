@@ -161,7 +161,7 @@ def main() -> None:
     sorted_idx = np.argsort(norm)[::-1]
     sorted_idx = sorted_idx[: args.max_points]
     points = floor_pts[sorted_idx]
-    colors = _color_map(norm[sorted_idx])
+    norm_values = norm[sorted_idx]
 
     cameras = _parse_cameras_txt(colmap_txt / "cameras.txt")
     images = _parse_images_txt(colmap_txt / "images.txt")
@@ -199,10 +199,14 @@ def main() -> None:
         overlay = frame.copy()
         if camera:
             proj, valid = _project_points(points, camera, cameras)
-            valid_colors = colors[valid]
-            for (u, v), color in zip(proj.astype(np.int32), valid_colors):
+            valid_values = norm_values[valid]
+            for (u, v), value in zip(proj.astype(np.int32), valid_values):
                 if 0 <= u < width and 0 <= v < height:
-                    cv2.circle(overlay, (u, v), 5, color.tolist(), thickness=-1)
+                    radius = max(6, int(8 + value * 25))
+                    red = int(200 * value + 55)
+                    green = int(200 * (1 - value) + 30)
+                    color = (0, green, red)
+                    cv2.circle(overlay, (u, v), radius, color, thickness=-1)
         frame = cv2.addWeighted(overlay, args.alpha, frame, 1.0 - args.alpha, 0)
         writer.write(frame)
         frame_idx += 1
