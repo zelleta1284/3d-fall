@@ -48,6 +48,10 @@ class RiskWeights:
 class RiskSpec:
     obstacle_distance_m: float
     weights: RiskWeights
+    coverage_mode: str
+    coverage_weight: float
+    semantic_hazards_path: Optional[str]
+    semantic_weight: float
 
 
 @dataclass
@@ -164,6 +168,10 @@ def load_config(path: Path) -> SimConfig:
     risk = RiskSpec(
         obstacle_distance_m=_safe_float(risk_cfg.get("obstacle_distance_m"), 0.4),
         weights=weights,
+        coverage_mode=str(risk_cfg.get("coverage_mode", "paths")),
+        coverage_weight=_safe_float(risk_cfg.get("coverage_weight"), 0.25),
+        semantic_hazards_path=risk_cfg.get("semantic_hazards_path"),
+        semantic_weight=_safe_float(risk_cfg.get("semantic_weight"), 1.0),
     )
 
     patient = cfg.get("patient")
@@ -502,6 +510,33 @@ def simulate_risk(mesh_path: Path, config_path: Path, out_dir: Path) -> Path:
                     + cfg.risk.weights.slip * slip_risk
                 ) * stability
 
+    if cfg.risk.coverage_mode == "full_grid":
+        coverage_weight = cfg.risk.coverage_weight
+        obstacle_risk_grid = np.clip(
+            (cfg.risk.obstacle_distance_m - dist_grid) / max(cfg.risk.obstacle_distance_m, 1e-6),
+            0.0,
+            1.0,
+        )
+        trip_risk_grid = (height_grid - floor_z > clearance).astype(np.float32)
+        trip_risk_grid *= 1.0 + cfg.biomechanics.shuffle_bias
+
+        a_lat = (cfg.gait.speed_mps ** 2) / max(cfg.gait.turn_radius, 1e-3)
+        slip_ratio = np.clip(
+            (a_lat - friction_grid * 9.81) / np.maximum(friction_grid * 9.81, 1e-6),
+            0.0,
+            1.0,
+        )
+
+        comp_obstacle += coverage_weight * cfg.risk.weights.obstacle * obstacle_risk_grid * stability
+        comp_trip += coverage_weight * cfg.risk.weights.trip * trip_risk_grid * stability
+        comp_slip += coverage_weight * cfg.risk.weights.slip * slip_ratio * stability
+
+        heat += coverage_weight * (
+            cfg.risk.weights.obstacle * obstacle_risk_grid
+            + cfg.risk.weights.trip * trip_risk_grid
+            + cfg.risk.weights.slip * slip_ratio
+        ) * stability
+
     if cfg.physics.enabled:
         physics_risk = physics_collision_risk(
             str(mesh_path),
@@ -517,6 +552,26 @@ def simulate_risk(mesh_path: Path, config_path: Path, out_dir: Path) -> Path:
 
     comp_glare += cfg.risk.weights.glare * glare
     heat += cfg.risk.weights.glare * glare
+
+    semantic_path = Path(cfg.risk.semantic_hazards_path) if cfg.risk.semantic_hazards_path else None
+    if semantic_path and semantic_path.exists():
+        try:
+            semantic = np.load(semantic_path)
+            sem_weight = cfg.risk.semantic_weight
+            if "obstacle" in semantic:
+                comp_obstacle += sem_weight * cfg.risk.weights.obstacle * semantic["obstacle"]
+                heat += sem_weight * cfg.risk.weights.obstacle * semantic["obstacle"]
+            if "trip" in semantic:
+                comp_trip += sem_weight * cfg.risk.weights.trip * semantic["trip"]
+                heat += sem_weight * cfg.risk.weights.trip * semantic["trip"]
+            if "slip" in semantic:
+                comp_slip += sem_weight * cfg.risk.weights.slip * semantic["slip"]
+                heat += sem_weight * cfg.risk.weights.slip * semantic["slip"]
+            if "turn" in semantic:
+                comp_turn += sem_weight * cfg.risk.weights.turn * semantic["turn"]
+                heat += sem_weight * cfg.risk.weights.turn * semantic["turn"]
+        except Exception as exc:
+            print(f"Semantic hazards skipped: {exc}")
 
     out_dir.mkdir(parents=True, exist_ok=True)
     heat_path = out_dir / "risk_heatmap.npy"
@@ -553,6 +608,8 @@ def simulate_risk(mesh_path: Path, config_path: Path, out_dir: Path) -> Path:
             "Floor/ceiling estimated from z-percentiles of mesh vertices.",
             "Obstacles defined as heights above floor_z + obstacle_height_threshold_m.",
             "Risk integrates obstacle proximity, turn curvature, slip (friction), trip (clearance), and glare.",
+            "Coverage mode may add risk across the entire grid in addition to simulated paths.",
+            "Semantic hazards (if enabled) inject object-detection cues into obstacle/trip/turn maps.",
             "Patient intake may adjust parameters; see patient_effects.adjustments.",
         ],
     }

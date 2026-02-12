@@ -285,7 +285,8 @@ def _risk_explanation_text(risk_summary: Dict[str, Any]) -> str:
         "p95 and p99 are thresholds for the highest-risk 5% and 1% of floor cells. "
         "coverage.above_p95/above_p99 tell what share of the room falls into those high-risk bands. "
         "components break total risk into causes (obstacle, trip, slip, turn, glare, physics). "
-        "dominant_factors lists the top contributors, and hotspots are the specific coordinates of highest risk."
+        "dominant_factors lists the top contributors, and hotspots are the specific coordinates of highest risk. "
+        "Semantic hazards (if enabled) inject object-detection cues into the obstacle/trip/turn components."
     )
 
 
@@ -363,6 +364,36 @@ def _process_room(
 
     _save_config(config_out, cfg)
 
+    semantic_path = None
+    semantic_summary = None
+    if not args.no_semantic:
+        try:
+            from digital_twin.semantic_hazards import SemanticConfig, compute_semantic_hazards
+
+            semantic_path = workdir / "semantic_hazards.npz"
+            semantic_summary = workdir / "semantic_hazards.json"
+            sem_cfg = SemanticConfig(
+                score_threshold=args.semantic_score_threshold,
+                mask_threshold=args.semantic_mask_threshold,
+                frame_stride=args.semantic_frame_stride,
+                pixel_stride=args.semantic_pixel_stride,
+                low_profile_height_m=args.semantic_low_height,
+            )
+            compute_semantic_hazards(
+                workdir=workdir,
+                mesh_path=final_mesh,
+                grid_size=float(cfg.get("room", {}).get("grid_size_m", 0.05)),
+                obstacle_height_m=float(cfg.get("room", {}).get("obstacle_height_m", 0.2)),
+                out_path=semantic_path,
+                summary_path=semantic_summary,
+                config=sem_cfg,
+            )
+            cfg.setdefault("risk", {})
+            cfg["risk"]["semantic_hazards_path"] = str(semantic_path)
+            _save_config(config_out, cfg)
+        except Exception as exc:
+            print(f"Semantic hazards skipped: {exc}")
+
     risk_dir = workdir / "risk"
     simulate_risk(final_mesh, config_out, risk_dir)
 
@@ -436,6 +467,10 @@ def _process_room(
             "report_json": _label(report_dir / "report.json"),
         },
     }
+    if semantic_path and semantic_path.exists():
+        room_output["outputs"]["semantic_hazards_npz"] = _label(semantic_path)
+    if semantic_summary and semantic_summary.exists():
+        room_output["outputs"]["semantic_hazards_json"] = _label(semantic_summary)
 
     room_output_path = workdir / "room_output.json"
     with room_output_path.open("w", encoding="utf-8") as f:
@@ -466,6 +501,12 @@ def main() -> None:
     parser.add_argument("--auto-scale", dest="auto_scale", action="store_true", default=True, help="Auto-scale mesh using priors (default)")
     parser.add_argument("--no-auto-scale", dest="auto_scale", action="store_false", help="Disable auto-scale priors")
     parser.add_argument("--no-mesh-video", action="store_true", help="Skip mesh preview video")
+    parser.add_argument("--no-semantic", action="store_true", help="Skip semantic hazard detection")
+    parser.add_argument("--semantic-score-threshold", type=float, default=0.55)
+    parser.add_argument("--semantic-mask-threshold", type=float, default=0.5)
+    parser.add_argument("--semantic-frame-stride", type=int, default=3)
+    parser.add_argument("--semantic-pixel-stride", type=int, default=6)
+    parser.add_argument("--semantic-low-height", type=float, default=0.12)
     args = parser.parse_args()
 
     if args.keragon:

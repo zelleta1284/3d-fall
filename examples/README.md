@@ -101,6 +101,20 @@ Use the `scripts/overlay_risk_video.py` helper to add fall-risk colors to the or
 
 If the run already computed `risk_components.npz`, the overlay highlights obstacle/trip/slip/turn/glare/physics layers; otherwise it uses the overall heatmap as a fallback.
 
+## Semantic hazards (object recognition)
+
+By default, `run_all.py` runs an object-detection pass (Mask R-CNN) to tag common household objects and project them into the floor grid. This improves obstacle/trip coverage for things like furniture, tables, chairs, and clutter even if the mesh is coarse.
+
+You can disable it with `--no-semantic`, or adjust detection density with:
+
+```
+--semantic-score-threshold 0.55
+--semantic-frame-stride 3
+--semantic-pixel-stride 6
+```
+
+When enabled, the run writes `semantic_hazards.npz` and `semantic_hazards.json` in the workdir and merges them into the risk components.
+
 ## Room output JSON
 
 Each room run emits `room_output.json` with patient intake, inferred adjustments, the room interpretation/risk summary, mitigation guidance, and the generated assets. The sanitized `examples/room_output_example.json` shows the expected structure with `<workdir>/…` placeholders for easy integration into other systems.

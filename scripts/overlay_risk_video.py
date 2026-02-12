@@ -140,6 +140,10 @@ def main() -> None:
     frames_dir = workdir / "frames"
     risk_dir = workdir / "risk"
     colmap_txt = workdir / "colmap_txt"
+    if not colmap_txt.exists():
+        alt = workdir / "colmap" / "sparse_txt"
+        if alt.exists():
+            colmap_txt = alt
     heatmap_path = risk_dir / "risk_heatmap.npy"
     room_interp = risk_dir / "room_interpretation.json"
     mesh_path = workdir / "mesh_scaled_auto.ply"
