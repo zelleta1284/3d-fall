@@ -22,6 +22,14 @@ def _ensure_dir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
 
 
+def _label_output(path: Path, workdir: Path) -> str:
+    try:
+        rel = path.relative_to(workdir)
+        return f"<workdir>/{rel.as_posix()}"
+    except ValueError:
+        return str(path)
+
+
 def _scale_mesh(mesh_path: Path, distance_m: float, picked_path: Path | None, out_path: Path) -> Path:
     try:
         import open3d as o3d
@@ -158,16 +166,46 @@ def _make_report(
     print(f"JSON report written to: {json_path}")
 
 
+def _risk_context_text(risk_summary: Dict[str, Any]) -> str:
+    dominant = risk_summary.get("dominant_factors", [])
+    coverage = risk_summary.get("coverage", {})
+    hotspots = risk_summary.get("hotspots", [])
+
+    if dominant:
+        top = ", ".join(
+            f"{d['factor']} ({int(d.get('share', 0) * 100)}% of total)"
+            for d in dominant[:3]
+        )
+    else:
+        top = "no clear dominant hazards"
+
+    hotspot_text = ""
+    if hotspots:
+        coords = hotspots[0]["position"]
+        hotspot_text = f" Top hotspot near ({coords[0]:.2f}, {coords[1]:.2f})."
+
+    above_p95 = coverage.get("above_p95", 0.0)
+    above_p99 = coverage.get("above_p99", 0.0)
+    coverage_text = (
+        f" {above_p95*100:.1f}% of the floor exceeds the 95th percentile risk "
+        f"and {above_p99*100:.1f}% exceeds the 99th percentile."
+        if coverage
+        else ""
+    )
+
+    return f"Dominant hazards: {top}.{hotspot_text}{coverage_text}"
+
+
 def _risk_summary(heat: np.ndarray, min_xy: np.ndarray, grid_size: float) -> Dict[str, Any]:
     if heat.size == 0:
-        return {"overall_risk_score": 0.0, "hotspots": []}
+        return {"overall_risk_score": 0.0, "hotspots": [], "context_text": "No risk data captured."}
 
     max_val = np.percentile(heat, 99) if np.any(heat) else 1.0
     overall = float(np.clip(np.mean(heat) / max(max_val, 1e-6), 0.0, 1.0))
     p95 = float(np.percentile(heat, 95))
     p99 = float(np.percentile(heat, 99))
     hotspots = compute_hotspots(heat, min_xy, grid_size, k=5)
-    return {
+    summary = {
         "overall_risk_score": overall,
         "p95": p95,
         "p99": p99,
@@ -175,6 +213,8 @@ def _risk_summary(heat: np.ndarray, min_xy: np.ndarray, grid_size: float) -> Dic
             {"position": [h.position[0], h.position[1]], "score": h.score} for h in hotspots
         ],
     }
+    summary["context_text"] = _risk_context_text(summary)
+    return summary
 
 
 def _suggest_dme(room_name: str | None, patient: Dict[str, Any], interpretation: Dict[str, Any]) -> List[Dict[str, str]]:
@@ -369,26 +409,31 @@ def _process_room(
     else:
         risk_summary = _risk_summary(heat, min_xy, grid_size)
 
+    risk_summary.setdefault("context_text", _risk_context_text(risk_summary))
+
     risk_summary["narrative"] = _risk_narrative(risk_summary)
     risk_summary["explanation_text"] = _risk_explanation_text(risk_summary)
 
+    def _label(p: Path) -> str:
+        return _label_output(p, workdir)
+
     room_output = {
         "patient_input": patient_input,
-        "patient_inferences": patient_inference.get("patient_effects", {}),
+        "patient_inferences": patient_inference,
         "room_name": patient_input.get("room_name") if isinstance(patient_input, dict) else room_name,
         "room_interpretation": interpretation.get("room", interpretation),
         "risk_summary": risk_summary,
         "explanation_text": risk_summary.get("explanation_text", ""),
         "mitigations": _suggest_dme(room_name, patient_input if isinstance(patient_input, dict) else {}, interpretation),
         "outputs": {
-            "mesh_ply": str(final_mesh),
-            "mesh_preview_mp4": str(workdir / "mesh_preview.mp4"),
-            "heatmap_png": str(risk_dir / "risk_heatmap.png"),
-            "heatmap_npy": str(heatmap_path),
-            "room_interpretation_json": str(interp_path),
-            "patient_inference_json": str(patient_path),
-            "risk_summary_json": str(risk_summary_path),
-            "report_json": str(report_dir / "report.json"),
+            "mesh_ply": _label(final_mesh),
+            "mesh_preview_mp4": _label(workdir / "mesh_preview.mp4"),
+            "heatmap_png": _label(risk_dir / "risk_heatmap.png"),
+            "heatmap_npy": _label(heatmap_path),
+            "room_interpretation_json": _label(interp_path),
+            "patient_inference_json": _label(patient_path),
+            "risk_summary_json": _label(risk_summary_path),
+            "report_json": _label(report_dir / "report.json"),
         },
     }
 

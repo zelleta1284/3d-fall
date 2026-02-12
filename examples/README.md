@@ -87,3 +87,20 @@ If you know a real-world distance in the room, run with `--scale-distance` and o
 - `/tmp/surestep_example/risk/room_interpretation.json`
 - `/tmp/surestep_example/risk/risk_summary.json`
 - `/tmp/surestep_example/room_output.json`
+
+## Overlay video (synthetic input)
+
+Use the `scripts/overlay_risk_video.py` helper to add fall-risk colors to the original footage. It projects component-specific fall hazards onto each frame and blends them with the original capture:
+
+```
+../scripts/overlay_risk_video.py \
+  --video /path/to/3d-fall/examples/surestep_living.mp4 \
+  --workdir /tmp/surestep_example \
+  --output /tmp/surestep_example/livingRoom_risk_overlay.mp4
+```
+
+If the run already computed `risk_components.npz`, the overlay highlights obstacle/trip/slip/turn/glare/physics layers; otherwise it uses the overall heatmap as a fallback.
+
+## Room output JSON
+
+Each room run emits `room_output.json` with patient intake, inferred adjustments, the room interpretation/risk summary, mitigation guidance, and the generated assets. The sanitized `examples/room_output_example.json` shows the expected structure with `<workdir>/…` placeholders for easy integration into other systems.

@@ -1,0 +1,217 @@
+{
+  "patient_input": {
+    "age": 78,
+    "gender": "female",
+    "fall_last_6_months": true,
+    "fall_hospitalized": false,
+    "can_get_out_of_bed": true,
+    "assistive_aid": true,
+    "room_name": "living"
+  },
+  "patient_inferences": {
+    "patient": {
+      "age": 78,
+      "gender": "female",
+      "fall_last_6_months": true,
+      "fall_hospitalized": false,
+      "can_get_out_of_bed": true,
+      "assistive_aid": true
+    },
+    "patient_effects": {
+      "adjustments": [
+        {
+          "field": "gait.speed_mps",
+          "from": 0.65,
+          "to": 0.5850000000000001,
+          "reason": "age>=70"
+        },
+        {
+          "field": "biomechanics.reaction_time_s",
+          "from": 0.7,
+          "to": 0.77,
+          "reason": "age>=70"
+        },
+        {
+          "field": "risk.weights.obstacle",
+          "from": 1.4,
+          "to": 1.54,
+          "reason": "fall_last_6_months"
+        },
+        {
+          "field": "risk.weights.slip",
+          "from": 1.2,
+          "to": 1.32,
+          "reason": "fall_last_6_months"
+        },
+        {
+          "field": "risk.weights.trip",
+          "from": 1.3,
+          "to": 1.4300000000000002,
+          "reason": "fall_last_6_months"
+        },
+        {
+          "field": "biomechanics.cane",
+          "from": 0.0,
+          "to": 1.0,
+          "reason": "assistive_aid"
+        },
+        {
+          "field": "gait.speed_mps",
+          "from": 0.5850000000000001,
+          "to": 0.5265000000000001,
+          "reason": "assistive_aid"
+        },
+        {
+          "field": "gait.lateral_std",
+          "from": 0.07,
+          "to": 0.06300000000000001,
+          "reason": "assistive_aid"
+        }
+      ],
+      "notes": [
+        "gender recorded; no model adjustment applied"
+      ]
+    },
+    "room_name": "living"
+  },
+  "room_name": "living",
+  "room_interpretation": {
+    "room_name": null,
+    "floor_z_estimate_m": 2.689870667514497,
+    "ceiling_z_estimate_m": 5.516195150017248,
+    "height_span_m": 2.826324482502751,
+    "grid_size_m": 0.03,
+    "obstacle_height_threshold_m": 0.08,
+    "obstacle_cells": 566,
+    "obstacle_ratio": 0.12243132165260653,
+    "friction_zones": 3,
+    "lighting_windows": 3,
+    "lighting_lights": 1
+  },
+  "risk_summary": {
+    "overall_risk_score": 0.1990509033203125,
+    "p95": 0.3722332715988159,
+    "p99": 0.625123143196106,
+    "hotspots": [
+      {
+        "position": [
+          0.9597704682554098,
+          0.9867387880297158
+        ],
+        "score": 0.7414501905441284
+      },
+      {
+        "position": [
+          0.9597704682554098,
+          1.0167387880297158
+        ],
+        "score": 0.7411317229270935
+      },
+      {
+        "position": [
+          0.9597704682554098,
+          0.9567387880297158
+        ],
+        "score": 0.7363072633743286
+      },
+      {
+        "position": [
+          0.9597704682554098,
+          1.0467387880297159
+        ],
+        "score": 0.7353657484054565
+      },
+      {
+        "position": [
+          0.9297704682554095,
+          0.9867387880297158
+        ],
+        "score": 0.7314656972885132
+      }
+    ],
+    "coverage": {
+      "above_p95": 0.05018386329223448,
+      "above_p99": 0.010166558511788881
+    },
+    "components": {
+      "obstacle": {
+        "mean": 0.0,
+        "p95": 0.0,
+        "sum": 0.0,
+        "share": 0.0
+      },
+      "turn": {
+        "mean": 0.0,
+        "p95": 0.0,
+        "sum": 0.0,
+        "share": 0.0
+      },
+      "trip": {
+        "mean": 0.0,
+        "p95": 0.0,
+        "sum": 0.0,
+        "share": 0.0
+      },
+      "slip": {
+        "mean": 0.0,
+        "p95": 0.0,
+        "sum": 0.0,
+        "share": 0.0
+      },
+      "glare": {
+        "mean": 0.12443132698535919,
+        "p95": 0.3722332715988159,
+        "sum": 575.2460327148438,
+        "share": 1.0
+      },
+      "physics": {
+        "mean": 0.0,
+        "p95": 0.0,
+        "sum": 0.0,
+        "share": 0.0
+      }
+    },
+    "dominant_factors": [
+      {
+        "factor": "glare",
+        "share": 1.0
+      },
+      {
+        "factor": "obstacle",
+        "share": 0.0
+      },
+      {
+        "factor": "turn",
+        "share": 0.0
+      }
+    ],
+    "context_text": "Dominant hazards: glare (100% of total), obstacle (0% of total), turn (0% of total). Top hotspot near (0.96, 0.99). 5.0% of the floor exceeds the 95th percentile risk and 1.0% exceeds the 99th percentile.",
+    "narrative": "Overall risk in this room is low (score 0.20). Risk is concentrated in small areas: top 5% of floor cells have risk >= 0.37, top 1% >= 0.63. Approximately 5.0% of cells exceed p95 and 1.0% exceed p99. Dominant contributors: glare (100%), obstacle (0%), turn (0%).",
+    "explanation_text": "How to read this: overall_risk_score compares the average floor risk to the worst hotspots (0 = very low overall, 1 = average as risky as the worst spot). p95 and p99 are thresholds for the highest-risk 5% and 1% of floor cells. coverage.above_p95/above_p99 tell what share of the room falls into those high-risk bands. components break total risk into causes (obstacle, trip, slip, turn, glare, physics). dominant_factors lists the top contributors, and hotspots are the specific coordinates of highest risk."
+  },
+  "explanation_text": "How to read this: overall_risk_score compares the average floor risk to the worst hotspots (0 = very low overall, 1 = average as risky as the worst spot). p95 and p99 are thresholds for the highest-risk 5% and 1% of floor cells. coverage.above_p95/above_p99 tell what share of the room falls into those high-risk bands. components break total risk into causes (obstacle, trip, slip, turn, glare, physics). dominant_factors lists the top contributors, and hotspots are the specific coordinates of highest risk.",
+  "mitigations": [
+    {
+      "item": "Secure rugs or remove them",
+      "reason": "Common fall source in living areas."
+    },
+    {
+      "item": "Increase ambient lighting",
+      "reason": "Improves visibility and contrast."
+    },
+    {
+      "item": "Reposition low furniture",
+      "reason": "Reduces collision/turning risk."
+    }
+  ],
+  "outputs": {
+    "mesh_ply": "<workdir>/mesh_scaled_auto.ply",
+    "mesh_preview_mp4": "<workdir>/mesh_preview.mp4",
+    "heatmap_png": "<workdir>/risk/risk_heatmap.png",
+    "heatmap_npy": "<workdir>/risk/risk_heatmap.npy",
+    "room_interpretation_json": "<workdir>/risk/room_interpretation.json",
+    "patient_inference_json": "<workdir>/risk/patient_inference.json",
+    "risk_summary_json": "<workdir>/risk/risk_summary.json",
+    "report_json": "<workdir>/report/report.json"
+  }
+}
