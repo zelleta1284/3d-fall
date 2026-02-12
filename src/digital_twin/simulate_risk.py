@@ -60,6 +60,7 @@ class RoomSpec:
     obstacle_height_m: float
     default_friction: float
     friction_zones: List[Dict]
+    floor_material: Optional[str] = None
 
 
 @dataclass
@@ -109,6 +110,7 @@ def load_config(path: Path) -> SimConfig:
         obstacle_height_m=_safe_float(room_cfg.get("obstacle_height_m"), 0.2),
         default_friction=_safe_float(room_cfg.get("default_friction"), 0.6),
         friction_zones=room_cfg.get("friction_zones", []),
+        floor_material=room_cfg.get("floor_material"),
     )
 
     lighting_cfg = cfg.get("lighting")
@@ -594,6 +596,8 @@ def simulate_risk(mesh_path: Path, config_path: Path, out_dir: Path) -> Path:
             "floor_z_estimate_m": floor_z,
             "ceiling_z_estimate_m": ceil_z,
             "height_span_m": float(ceil_z - floor_z),
+            "floor_material": cfg.room.floor_material,
+            "default_friction": cfg.room.default_friction,
             "grid_size_m": cfg.room.grid_size_m,
             "obstacle_height_threshold_m": cfg.room.obstacle_height_m,
             "obstacle_cells": int(obstacle_grid.sum()),

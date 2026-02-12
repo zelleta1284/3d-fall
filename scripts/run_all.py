@@ -364,6 +364,39 @@ def _process_room(
 
     _save_config(config_out, cfg)
 
+    floor_material_path = None
+    if not args.no_floor_material:
+        try:
+            from digital_twin.floor_material import FloorMaterialConfig, infer_floor_material
+
+            floor_material_path = workdir / "floor_material.json"
+            fm_cfg = FloorMaterialConfig(
+                frame_stride=args.floor_frame_stride,
+                pixel_stride=args.floor_pixel_stride,
+                floor_height_min_m=args.floor_height_min,
+                floor_height_max_m=args.floor_height_max,
+                patch_size=args.floor_patch_size,
+                patch_count=args.floor_patch_count,
+                min_confidence=args.floor_min_confidence,
+            )
+            result = infer_floor_material(
+                workdir=workdir,
+                mesh_path=final_mesh,
+                obstacle_height_m=float(cfg.get("room", {}).get("obstacle_height_m", 0.2)),
+                out_path=floor_material_path,
+                config=fm_cfg,
+            )
+            if result:
+                cfg.setdefault("room", {})
+                cfg["room"]["floor_material"] = result.get("label")
+                cfg["room"]["floor_material_confidence"] = result.get("confidence")
+                cfg["room"]["floor_material_applied"] = result.get("applied")
+                if result.get("applied"):
+                    cfg["room"]["default_friction"] = result.get("friction")
+                _save_config(config_out, cfg)
+        except Exception as exc:
+            print(f"Floor material inference skipped: {exc}")
+
     semantic_path = None
     semantic_summary = None
     if not args.no_semantic:
@@ -478,6 +511,8 @@ def _process_room(
         room_output["outputs"]["semantic_hazards_npz"] = _label(semantic_path)
     if semantic_summary and semantic_summary.exists():
         room_output["outputs"]["semantic_hazards_json"] = _label(semantic_summary)
+    if floor_material_path and floor_material_path.exists():
+        room_output["outputs"]["floor_material_json"] = _label(floor_material_path)
 
     room_output_path = workdir / "room_output.json"
     with room_output_path.open("w", encoding="utf-8") as f:
@@ -508,6 +543,7 @@ def main() -> None:
     parser.add_argument("--auto-scale", dest="auto_scale", action="store_true", default=True, help="Auto-scale mesh using priors (default)")
     parser.add_argument("--no-auto-scale", dest="auto_scale", action="store_false", help="Disable auto-scale priors")
     parser.add_argument("--no-mesh-video", action="store_true", help="Skip mesh preview video")
+    parser.add_argument("--no-floor-material", action="store_true", help="Skip floor material inference")
     parser.add_argument("--no-semantic", action="store_true", help="Skip semantic hazard detection")
     parser.add_argument("--semantic-score-threshold", type=float, default=0.45)
     parser.add_argument("--semantic-mask-threshold", type=float, default=0.4)
@@ -520,6 +556,13 @@ def main() -> None:
     parser.add_argument("--semantic-rug-weight", type=float, default=0.75)
     parser.add_argument("--semantic-small-object-area", type=float, default=0.015)
     parser.add_argument("--semantic-small-object-trip-boost", type=float, default=1.4)
+    parser.add_argument("--floor-frame-stride", type=int, default=4)
+    parser.add_argument("--floor-pixel-stride", type=int, default=8)
+    parser.add_argument("--floor-height-min", type=float, default=-0.01)
+    parser.add_argument("--floor-height-max", type=float, default=0.03)
+    parser.add_argument("--floor-patch-size", type=int, default=160)
+    parser.add_argument("--floor-patch-count", type=int, default=24)
+    parser.add_argument("--floor-min-confidence", type=float, default=0.0)
     args = parser.parse_args()
 
     if args.keragon:

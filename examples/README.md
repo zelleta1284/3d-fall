@@ -123,6 +123,25 @@ When enabled, the run writes `semantic_hazards.npz` and `semantic_hazards.json` 
 
 If object detection stalls on Apple MPS, force CPU with `SURESTEP_DEVICE=cpu`.
 
+## Floor material inference (local CLIP)
+
+`run_all.py` can infer floor material from the video (polished hardwood, matte hardwood, tile, vinyl, carpet, concrete)
+and update `room.default_friction` automatically. This step is local-only and can be disabled with `--no-floor-material`.
+
+You can tune it with:
+
+```
+--floor-frame-stride 4
+--floor-pixel-stride 8
+--floor-height-min -0.01
+--floor-height-max 0.03
+--floor-patch-size 160
+--floor-patch-count 24
+--floor-min-confidence 0.0
+```
+
+The run writes `floor_material.json` in the workdir.
+
 ## Room output JSON
 
 Each room run emits `room_output.json` with patient intake, inferred adjustments, the room interpretation/risk summary, mitigation guidance, and the generated assets. The sanitized `examples/room_output_example.json` shows the expected structure with `<workdir>/…` placeholders for easy integration into other systems.

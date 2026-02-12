@@ -81,6 +81,8 @@
     "floor_z_estimate_m": 2.0133924239124767,
     "ceiling_z_estimate_m": 2.9653480114965376,
     "height_span_m": 0.9519555875840608,
+    "floor_material": "matte hardwood",
+    "default_friction": 0.4,
     "grid_size_m": 0.03,
     "obstacle_height_threshold_m": 0.08,
     "obstacle_cells": 266,
@@ -215,6 +217,7 @@
     "risk_summary_json": "<workdir>/risk/risk_summary.json",
     "report_json": "<workdir>/report/report.json",
     "semantic_hazards_npz": "<workdir>/semantic_hazards.npz",
-    "semantic_hazards_json": "<workdir>/semantic_hazards.json"
+    "semantic_hazards_json": "<workdir>/semantic_hazards.json",
+    "floor_material_json": "<workdir>/floor_material.json"
   }
 }
