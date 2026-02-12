@@ -522,6 +522,17 @@ def simulate_risk(mesh_path: Path, config_path: Path, out_dir: Path) -> Path:
     heat_path = out_dir / "risk_heatmap.npy"
     np.save(heat_path, heat)
 
+    components_path = out_dir / "risk_components.npz"
+    np.savez_compressed(
+        components_path,
+        obstacle=comp_obstacle,
+        turn=comp_turn,
+        trip=comp_trip,
+        slip=comp_slip,
+        glare=comp_glare,
+        physics=comp_physics,
+    )
+
     interpretation = {
         "room": {
             "room_name": cfg.patient.get("room_name") if isinstance(cfg.patient, dict) else None,

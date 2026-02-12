@@ -2,7 +2,7 @@
 import argparse
 import json
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import cv2
 import matplotlib.pyplot as plt
@@ -154,14 +154,50 @@ def main() -> None:
     ys = min_xy[1] + (np.arange(h) + 0.5) * grid_size
     xx, yy = np.meshgrid(xs, ys)
     floor_pts = np.column_stack([xx.ravel(), yy.ravel(), np.full(xx.size, floor_z, dtype=np.float32)])
-    heat_flat = heatmap.ravel()
-    if heat_flat.max() <= 0:
-        raise RuntimeError("Heatmap all zeros; nothing to overlay.")
-    norm = heat_flat / heat_flat.max()
-    sorted_idx = np.argsort(norm)[::-1]
-    sorted_idx = sorted_idx[: args.max_points]
-    points = floor_pts[sorted_idx]
-    norm_values = norm[sorted_idx]
+
+    components_path = risk_dir / "risk_components.npz"
+    component_colors: Dict[str, Tuple[int, int, int]] = {
+        "obstacle": (0, 80, 220),
+        "trip": (0, 150, 255),
+        "slip": (0, 200, 200),
+        "turn": (255, 100, 0),
+        "glare": (0, 220, 0),
+        "physics": (220, 0, 220),
+    }
+    component_layers: List[Dict[str, np.ndarray]] = []
+
+    if components_path.exists():
+        comp_data = np.load(components_path)
+        per_layer = max(20, args.max_points // max(len(component_colors), 1))
+        for name, color in component_colors.items():
+            if name not in comp_data:
+                continue
+            arr = comp_data[name].ravel()
+            if not np.any(arr > 0):
+                continue
+            limit = max(np.percentile(arr, 99), arr.max(), 1e-6)
+            norm_vals = arr / limit
+            idx = np.argsort(norm_vals)[::-1]
+            idx = idx[:per_layer]
+            component_layers.append(
+                {
+                    "name": name,
+                    "points": floor_pts[idx],
+                    "values": norm_vals[idx],
+                    "color": np.array(color, dtype=np.int32),
+                }
+            )
+
+    fallback_points = None
+    fallback_values = None
+    if not component_layers:
+        heat_flat = heatmap.ravel()
+        if heat_flat.max() <= 0:
+            raise RuntimeError("Heatmap all zeros; nothing to overlay.")
+        norm = heat_flat / heat_flat.max()
+        idx = np.argsort(norm)[::-1][: args.max_points]
+        fallback_points = floor_pts[idx]
+        fallback_values = norm[idx]
 
     cameras = _parse_cameras_txt(colmap_txt / "cameras.txt")
     images = _parse_images_txt(colmap_txt / "images.txt")
@@ -198,15 +234,29 @@ def main() -> None:
             last_camera = camera
         overlay = frame.copy()
         if camera:
-            proj, valid = _project_points(points, camera, cameras)
-            valid_values = norm_values[valid]
-            for (u, v), value in zip(proj.astype(np.int32), valid_values):
-                if 0 <= u < width and 0 <= v < height:
-                    radius = max(6, int(8 + value * 25))
-                    red = int(200 * value + 55)
-                    green = int(200 * (1 - value) + 30)
-                    color = (0, green, red)
-                    cv2.circle(overlay, (u, v), radius, color, thickness=-1)
+            if component_layers:
+                for layer in component_layers:
+                    proj, valid = _project_points(layer["points"], camera, cameras)
+                    values = layer["values"][valid]
+                    base_color = layer["color"]
+                    for (u, v), value in zip(proj.astype(np.int32), values):
+                        if 0 <= u < width and 0 <= v < height:
+                            radius = max(6, int(10 + value * 20))
+                            intensity = 0.3 + 0.7 * value
+                            color = tuple(
+                                min(255, int(base_color[i] * intensity + 20)) for i in range(3)
+                            )
+                            cv2.circle(overlay, (u, v), radius, color, thickness=-1)
+            elif fallback_points is not None:
+                proj, valid = _project_points(fallback_points, camera, cameras)
+                valid_values = fallback_values[valid]
+                for (u, v), value in zip(proj.astype(np.int32), valid_values):
+                    if 0 <= u < width and 0 <= v < height:
+                        radius = max(6, int(8 + value * 25))
+                        red = int(200 * value + 55)
+                        green = int(200 * (1 - value) + 30)
+                        color = (0, green, red)
+                        cv2.circle(overlay, (u, v), radius, color, thickness=-1)
         frame = cv2.addWeighted(overlay, args.alpha, frame, 1.0 - args.alpha, 0)
         writer.write(frame)
         frame_idx += 1

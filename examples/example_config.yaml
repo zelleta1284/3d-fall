@@ -1,15 +1,22 @@
 room:
-  grid_size_m: 0.05
-  obstacle_height_m: 0.2
-  default_friction: 0.6
+  grid_size_m: 0.03
+  obstacle_height_m: 0.12
+  default_friction: 0.55
   friction_zones:
-    - rect: [1.0, 0.5, 2.0, 1.2]
+    - rect: [-0.5, -0.3, 1.2, 0.7]
+      mu: 0.35
+    - rect: [1.0, 0.4, 2.4, 2.2]
+      mu: 0.4
+    - rect: [0.5, 1.2, 2.5, 1.8]
       mu: 0.3
 
 paths:
-  - start: [0.0, 0.0]
-    goal: [3.0, 2.0]
+  - start: [0.2, 0.0]
+    goal: [2.8, 1.9]
     count: 2000
+  - start: [0.1, 1.5]
+    goal: [3.2, 0.6]
+    count: 1200
 
 gait:
   step_length: 0.5
@@ -18,9 +25,9 @@ gait:
   speed_mps: 0.7
 
 biomechanics:
-  foot_clearance_m: 0.03
+  foot_clearance_m: 0.04
   cane: true
-  shuffle_bias: 0.3
+  shuffle_bias: 0.35
   reaction_time_s: 0.7
 
 lighting:
@@ -47,14 +54,14 @@ physics:
   use_gui: false
 
 risk:
-  obstacle_distance_m: 0.4
+  obstacle_distance_m: 0.45
   weights:
-    obstacle: 1.0
-    turn: 0.5
-    glare: 0.8
-    trip: 1.0
-    slip: 0.8
-    physics: 1.0
+    obstacle: 1.2
+    turn: 1.0
+    glare: 0.6
+    trip: 1.1
+    slip: 1.0
+    physics: 1.2
 
 patient:
   age: 78
