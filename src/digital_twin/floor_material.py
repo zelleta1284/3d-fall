@@ -30,8 +30,8 @@ class FloorMaterialConfig:
     pixel_stride: int = 8
     floor_height_min_m: float = -0.01
     floor_height_max_m: float = 0.03
-    patch_size: int = 160
-    patch_count: int = 24
+    patch_size: int = 192
+    patch_count: int = 40
     min_confidence: float = 0.0
     gloss_threshold: float = 0.05
     gloss_boost: float = 0.1

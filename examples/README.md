@@ -135,8 +135,8 @@ You can tune it with:
 --floor-pixel-stride 8
 --floor-height-min -0.01
 --floor-height-max 0.03
---floor-patch-size 160
---floor-patch-count 24
+--floor-patch-size 192
+--floor-patch-count 40
 --floor-min-confidence 0.0
 ```
 

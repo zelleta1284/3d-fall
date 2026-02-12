@@ -19,8 +19,8 @@ def main() -> None:
     parser.add_argument("--pixel-stride", type=int, default=8)
     parser.add_argument("--floor-min-height", type=float, default=-0.01)
     parser.add_argument("--floor-max-height", type=float, default=0.03)
-    parser.add_argument("--patch-size", type=int, default=160)
-    parser.add_argument("--patch-count", type=int, default=24)
+    parser.add_argument("--patch-size", type=int, default=192)
+    parser.add_argument("--patch-count", type=int, default=40)
     parser.add_argument("--min-confidence", type=float, default=0.0)
     args = parser.parse_args()
 
