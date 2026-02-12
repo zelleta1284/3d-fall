@@ -31,6 +31,7 @@ class SemanticConfig:
 
 
 HAZARD_MAP: Dict[str, Dict[str, float]] = {
+    # Bedroom / living room
     "couch": {"obstacle": 1.0, "turn": 0.2},
     "chair": {"obstacle": 0.8, "trip": 0.5, "turn": 0.1},
     "dining table": {"obstacle": 1.0, "turn": 0.2},
@@ -43,21 +44,38 @@ HAZARD_MAP: Dict[str, Dict[str, float]] = {
     "keyboard": {"trip": 0.3},
     "cell phone": {"trip": 0.25},
     "potted plant": {"obstacle": 0.6, "trip": 0.4},
+    "book": {"trip": 0.4},
+    "clock": {"trip": 0.2},
+    "vase": {"trip": 0.4, "obstacle": 0.3},
+    "teddy bear": {"trip": 0.3},
+    # Bathroom
     "toilet": {"obstacle": 0.9, "slip": 0.2},
     "sink": {"obstacle": 0.6, "slip": 0.2},
+    "hair drier": {"trip": 0.2},
+    "toothbrush": {"trip": 0.2},
+    # Kitchen
     "refrigerator": {"obstacle": 1.0},
     "microwave": {"obstacle": 0.4},
     "oven": {"obstacle": 0.7},
     "toaster": {"obstacle": 0.3},
-    "book": {"trip": 0.4},
-    "wine glass": {"trip": 0.25},
-    "fork": {"trip": 0.2},
     "knife": {"trip": 0.2},
+    "fork": {"trip": 0.2},
     "spoon": {"trip": 0.2},
+    "bottle": {"trip": 0.3},
+    "wine glass": {"trip": 0.25},
+    "cup": {"trip": 0.25},
+    "bowl": {"trip": 0.25},
+    "banana": {"slip": 0.2, "trip": 0.1},
+    "apple": {"trip": 0.15},
+    "orange": {"trip": 0.15},
+    "sandwich": {"trip": 0.1},
+    "pizza": {"trip": 0.1},
+    "donut": {"trip": 0.1},
     "backpack": {"trip": 0.8},
     "handbag": {"trip": 0.7},
     "suitcase": {"trip": 0.8},
     "umbrella": {"trip": 0.4},
+    # Hallway / entry / general clutter
     "skis": {"trip": 0.6},
     "snowboard": {"trip": 0.6},
     "sports ball": {"trip": 0.6},
@@ -67,17 +85,9 @@ HAZARD_MAP: Dict[str, Dict[str, float]] = {
     "skateboard": {"trip": 0.6},
     "surfboard": {"trip": 0.6},
     "tennis racket": {"trip": 0.4},
-    "vase": {"trip": 0.4, "obstacle": 0.3},
-    "bottle": {"trip": 0.3},
-    "cup": {"trip": 0.25},
-    "bowl": {"trip": 0.25},
     "dog": {"trip": 0.7, "obstacle": 0.3},
     "cat": {"trip": 0.6, "obstacle": 0.25},
     "scissors": {"trip": 0.2},
-    "clock": {"trip": 0.2},
-    "teddy bear": {"trip": 0.3},
-    "hair drier": {"trip": 0.2},
-    "toothbrush": {"trip": 0.2},
 }
 
 
