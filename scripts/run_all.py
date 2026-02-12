@@ -570,7 +570,7 @@ def main() -> None:
     parser.add_argument("--floor-patch-size", type=int, default=192)
     parser.add_argument("--floor-patch-count", type=int, default=40)
     parser.add_argument("--floor-min-confidence", type=float, default=0.0)
-    parser.add_argument("--floor-glare-threshold", type=float, default=0.002)
+    parser.add_argument("--floor-glare-threshold", type=float, default=0.0005)
     parser.add_argument("--floor-glare-friction-multiplier", type=float, default=0.85)
     args = parser.parse_args()
 
