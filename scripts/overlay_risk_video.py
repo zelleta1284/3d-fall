@@ -157,6 +157,10 @@ def main() -> None:
     parser.add_argument("--component-quantile", type=float, default=0.8, help="Quantile threshold for component points")
     parser.add_argument("--point-radius-min", type=int, default=10, help="Minimum overlay point radius")
     parser.add_argument("--point-radius-max", type=int, default=40, help="Maximum overlay point radius")
+    parser.add_argument("--show-heat", action="store_true", help="Include heatmap layer")
+    parser.add_argument("--no-components", dest="show_components", action="store_false", help="Hide component layers")
+    parser.set_defaults(show_components=True)
+    parser.add_argument("--legend", action="store_true", help="Draw legend")
     args = parser.parse_args()
 
     workdir = Path(args.workdir)
@@ -218,16 +222,16 @@ def main() -> None:
 
     components_path = risk_dir / "risk_components.npz"
     component_colors: Dict[str, Tuple[int, int, int]] = {
-        "obstacle": (0, 80, 220),
-        "trip": (0, 150, 255),
-        "slip": (0, 200, 200),
-        "turn": (255, 100, 0),
-        "glare": (0, 220, 0),
-        "physics": (220, 0, 220),
+        "obstacle": (0, 0, 255),   # red
+        "trip": (0, 128, 255),     # orange
+        "slip": (255, 0, 0),       # blue
+        "turn": (0, 255, 0),       # green
+        "glare": (0, 255, 255),    # yellow
+        "physics": (255, 0, 255),  # magenta
     }
     component_layers: List[Dict[str, np.ndarray]] = []
 
-    if components_path.exists():
+    if args.show_components and components_path.exists():
         comp_data = np.load(components_path)
         per_layer = max(50, args.max_points // max(len(component_colors), 1))
         for name, color in component_colors.items():
@@ -252,23 +256,24 @@ def main() -> None:
                 }
             )
 
-    heat_flat = heatmap.ravel()
-    heat_max = heat_flat.max() if heat_flat.size else 0.0
-    if heat_max <= 0:
-        raise RuntimeError("Heatmap all zeros; nothing to overlay.")
-    norm_heat = heat_flat / heat_max
-    heat_thresh = np.quantile(norm_heat, args.heat_quantile) if np.any(norm_heat > 0) else 1.0
-    idx_heat = np.where(norm_heat >= heat_thresh)[0]
-    if idx_heat.size > args.max_points:
-        idx_heat = np.random.choice(idx_heat, size=args.max_points, replace=False)
-    component_layers.append(
-        {
-            "name": "heat",
-            "points": floor_pts[idx_heat],
-            "values": np.clip(norm_heat[idx_heat], 0.0, 1.0),
-            "mode": "heat",
-        }
-    )
+    if args.show_heat:
+        heat_flat = heatmap.ravel()
+        heat_max = heat_flat.max() if heat_flat.size else 0.0
+        if heat_max <= 0:
+            raise RuntimeError("Heatmap all zeros; nothing to overlay.")
+        norm_heat = heat_flat / heat_max
+        heat_thresh = np.quantile(norm_heat, args.heat_quantile) if np.any(norm_heat > 0) else 1.0
+        idx_heat = np.where(norm_heat >= heat_thresh)[0]
+        if idx_heat.size > args.max_points:
+            idx_heat = np.random.choice(idx_heat, size=args.max_points, replace=False)
+        component_layers.append(
+            {
+                "name": "heat",
+                "points": floor_pts[idx_heat],
+                "values": np.clip(norm_heat[idx_heat], 0.0, 1.0),
+                "mode": "heat",
+            }
+        )
 
     def grid_cells_to_world(indices: np.ndarray) -> np.ndarray:
         if indices.size == 0:
@@ -404,6 +409,30 @@ def main() -> None:
                             )
                             cv2.circle(overlay, (u, v), radius, color, thickness=-1)
             frame = cv2.addWeighted(overlay, args.alpha, frame, 1.0 - args.alpha, 0)
+            if args.legend and component_layers:
+                legend_items = [
+                    ("Obstacle", component_colors["obstacle"]),
+                    ("Trip", component_colors["trip"]),
+                    ("Slip", component_colors["slip"]),
+                    ("Turn", component_colors["turn"]),
+                    ("Glare", component_colors["glare"]),
+                    ("Physics", component_colors["physics"]),
+                ]
+                x0, y0 = 12, 18
+                line_h = 18
+                for i, (label, color) in enumerate(legend_items):
+                    y = y0 + i * line_h
+                    cv2.rectangle(frame, (x0, y - 12), (x0 + 12, y), color, thickness=-1)
+                    cv2.putText(
+                        frame,
+                        label,
+                        (x0 + 18, y - 2),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.45,
+                        (255, 255, 255),
+                        1,
+                        cv2.LINE_AA,
+                    )
         writer.write(frame)
         frame_idx += 1
 
