@@ -7,6 +7,7 @@ import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 import open3d as o3d
+import yaml
 
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -103,13 +104,31 @@ def _project_points(
     y = pts_cam[:, 1] / pts_cam[:, 2]
     model = cam["model"]
     params = cam["params"]
-    if model == "SIMPLE_RADIAL":
-        fx, fy, cx, cy = params[:4]
-        k1 = params[4] if len(params) >= 5 else 0.0
+    if model == "SIMPLE_PINHOLE":
+        f, cx, cy = params[:3]
+        fx = fy = f
+    elif model == "SIMPLE_RADIAL":
+        f, cx, cy, k1 = params[:4]
+        fx = fy = f
         r2 = x * x + y * y
         scale = 1 + k1 * r2
         x *= scale
         y *= scale
+    elif model == "RADIAL":
+        f, cx, cy, k1, k2 = params[:5]
+        fx = fy = f
+        r2 = x * x + y * y
+        scale = 1 + k1 * r2 + k2 * r2 * r2
+        x *= scale
+        y *= scale
+    elif model == "OPENCV":
+        fx, fy, cx, cy, k1, k2, p1, p2 = params[:8]
+        r2 = x * x + y * y
+        radial = 1 + k1 * r2 + k2 * r2 * r2
+        x_tan = 2 * p1 * x * y + p2 * (r2 + 2 * x * x)
+        y_tan = p1 * (r2 + 2 * y * y) + 2 * p2 * x * y
+        x = x * radial + x_tan
+        y = y * radial + y_tan
     elif model == "PINHOLE":
         fx, fy, cx, cy = params[:4]
     else:
@@ -132,8 +151,12 @@ def main() -> None:
     parser.add_argument("--workdir", required=True, help="Workdir that produced run_all outputs")
     parser.add_argument("--output", required=True, help="Path for overlay video")
     parser.add_argument("--fps", type=float, default=2.0, help="Frame sampling rate used by run_all")
-    parser.add_argument("--alpha", type=float, default=0.6, help="Overlay alpha")
-    parser.add_argument("--max-points", type=int, default=800, help="Max grid points to project each frame")
+    parser.add_argument("--alpha", type=float, default=0.85, help="Overlay alpha")
+    parser.add_argument("--max-points", type=int, default=4000, help="Max grid points to project each frame")
+    parser.add_argument("--heat-quantile", type=float, default=0.7, help="Quantile threshold for heat points")
+    parser.add_argument("--component-quantile", type=float, default=0.8, help="Quantile threshold for component points")
+    parser.add_argument("--point-radius-min", type=int, default=10, help="Minimum overlay point radius")
+    parser.add_argument("--point-radius-max", type=int, default=40, help="Maximum overlay point radius")
     args = parser.parse_args()
 
     workdir = Path(args.workdir)
@@ -153,6 +176,12 @@ def main() -> None:
         raise RuntimeError("Missing required outputs in workdir.")
 
     cfg = load_config(config_path)
+    scale_result = {}
+    try:
+        scale_result = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        scale_result = scale_result.get("scale_result", {})
+    except Exception:
+        scale_result = {}
     heatmap = np.load(heatmap_path)
     obstacle_grid, height_grid, min_xy, floor_z = build_grids(
         np.asarray(o3d.io.read_triangle_mesh(str(mesh_path)).vertices),
@@ -161,11 +190,31 @@ def main() -> None:
     )
     grid_size = cfg.room.grid_size_m
 
+    scale = None
+    center = None
+    if scale_result:
+        try:
+            scale = float(scale_result.get("scale", 1.0))
+        except (TypeError, ValueError):
+            scale = None
+    if scale and scale != 1.0:
+        unscaled_mesh_path = workdir / "mesh.ply"
+        if unscaled_mesh_path.exists():
+            unscaled_mesh = o3d.io.read_triangle_mesh(str(unscaled_mesh_path))
+            if not unscaled_mesh.is_empty():
+                center = np.asarray(unscaled_mesh.get_center(), dtype=np.float32)
+
+    def _unscale(points: np.ndarray) -> np.ndarray:
+        if scale and center is not None:
+            return center + (points - center) / scale
+        return points
+
     h, w = heatmap.shape
     xs = min_xy[0] + (np.arange(w) + 0.5) * grid_size
     ys = min_xy[1] + (np.arange(h) + 0.5) * grid_size
     xx, yy = np.meshgrid(xs, ys)
     floor_pts = np.column_stack([xx.ravel(), yy.ravel(), np.full(xx.size, floor_z, dtype=np.float32)])
+    floor_pts = _unscale(floor_pts)
 
     components_path = risk_dir / "risk_components.npz"
     component_colors: Dict[str, Tuple[int, int, int]] = {
@@ -180,7 +229,7 @@ def main() -> None:
 
     if components_path.exists():
         comp_data = np.load(components_path)
-        per_layer = max(20, args.max_points // max(len(component_colors), 1))
+        per_layer = max(50, args.max_points // max(len(component_colors), 1))
         for name, color in component_colors.items():
             if name not in comp_data:
                 continue
@@ -189,7 +238,10 @@ def main() -> None:
                 continue
             limit = max(np.percentile(arr, 95), arr.max(), 1e-6)
             norm_vals = arr / limit
-            idx = np.argsort(norm_vals)[::-1][:per_layer]
+            thresh = np.quantile(norm_vals, args.component_quantile) if np.any(norm_vals > 0) else 1.0
+            idx = np.where(norm_vals >= thresh)[0]
+            if idx.size > per_layer:
+                idx = np.random.choice(idx, size=per_layer, replace=False)
             component_layers.append(
                 {
                     "name": name,
@@ -205,7 +257,10 @@ def main() -> None:
     if heat_max <= 0:
         raise RuntimeError("Heatmap all zeros; nothing to overlay.")
     norm_heat = heat_flat / heat_max
-    idx_heat = np.argsort(norm_heat)[::-1][: args.max_points]
+    heat_thresh = np.quantile(norm_heat, args.heat_quantile) if np.any(norm_heat > 0) else 1.0
+    idx_heat = np.where(norm_heat >= heat_thresh)[0]
+    if idx_heat.size > args.max_points:
+        idx_heat = np.random.choice(idx_heat, size=args.max_points, replace=False)
     component_layers.append(
         {
             "name": "heat",
@@ -221,7 +276,8 @@ def main() -> None:
         xs = min_xy[0] + (indices[:, 1] + 0.5) * grid_size
         ys = min_xy[1] + (indices[:, 0] + 0.5) * grid_size
         zs = np.full(xs.shape, floor_z, dtype=np.float32)
-        return np.column_stack([xs, ys, zs])
+        pts = np.column_stack([xs, ys, zs])
+        return _unscale(pts)
 
     def add_layer(name: str, indices: np.ndarray, values: np.ndarray, color: Tuple[int, int, int]) -> None:
         if indices.size == 0:
@@ -320,8 +376,14 @@ def main() -> None:
                 proj, valid = _project_points(layer["points"], camera, cameras)
                 if proj.size == 0:
                     continue
-                pts = proj.astype(np.int32)
                 values = layer["values"][valid]
+                finite = np.isfinite(proj).all(axis=1)
+                if not np.any(finite):
+                    continue
+                proj = proj[finite]
+                values = values[finite]
+                proj = np.nan_to_num(proj, nan=-1e6, posinf=-1e6, neginf=-1e6)
+                pts = proj.astype(np.int32)
                 if pts.size == 0:
                     continue
 
@@ -329,13 +391,13 @@ def main() -> None:
                     colors = _color_map(values)
                     for (u, v), color, value in zip(pts, colors, values):
                         if 0 <= u < width and 0 <= v < height:
-                            radius = max(6, int(8 + value * 25))
+                            radius = max(args.point_radius_min, int(args.point_radius_min + value * (args.point_radius_max - args.point_radius_min)))
                             cv2.circle(overlay, (u, v), radius, tuple(int(c) for c in color), thickness=-1)
                 else:
                     base_color = layer["color"]
                     for (u, v), value in zip(pts, values):
                         if 0 <= u < width and 0 <= v < height:
-                            radius = max(6, int(8 + value * 25))
+                            radius = max(args.point_radius_min, int(args.point_radius_min + value * (args.point_radius_max - args.point_radius_min)))
                             intensity = 0.4 + 0.6 * value
                             color = tuple(
                                 min(255, int(base_color[i] * intensity + 10)) for i in range(3)
