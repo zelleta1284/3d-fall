@@ -88,7 +88,7 @@ def _project_points(
     points: np.ndarray,
     camera: Dict[str, np.ndarray],
     cam_params: Dict[int, Dict[str, np.ndarray]],
-) -> np.ndarray:
+) -> Tuple[np.ndarray, np.ndarray]:
     qvec = camera["qvec"]
     tvec = camera["tvec"]
     cam_id = camera["camera_id"]
@@ -98,7 +98,7 @@ def _project_points(
     valid = pts_cam[:, 2] > 0
     pts_cam = pts_cam[valid]
     if pts_cam.size == 0:
-        return np.empty((0, 2), dtype=np.float32)
+        return np.empty((0, 2), dtype=np.float32), np.zeros((0,), dtype=bool)
     x = pts_cam[:, 0] / pts_cam[:, 2]
     y = pts_cam[:, 1] / pts_cam[:, 2]
     model = cam["model"]

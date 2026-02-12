@@ -78,68 +78,68 @@
   "room_name": "living",
   "room_interpretation": {
     "room_name": "living",
-    "floor_z_estimate_m": 2.3053331155669428,
-    "ceiling_z_estimate_m": 4.636264942857006,
-    "height_span_m": 2.3309318272900637,
+    "floor_z_estimate_m": 2.0133924239124767,
+    "ceiling_z_estimate_m": 2.9653480114965376,
+    "height_span_m": 0.9519555875840608,
     "grid_size_m": 0.03,
     "obstacle_height_threshold_m": 0.08,
-    "obstacle_cells": 153,
-    "obstacle_ratio": 0.02701271186440678,
+    "obstacle_cells": 266,
+    "obstacle_ratio": 0.7823529411764706,
     "friction_zones": 3,
-    "lighting_windows": 0,
+    "lighting_windows": 4,
     "lighting_lights": 1
   },
   "risk_summary": {
-    "overall_risk_score": 0.0791245847940445,
-    "p95": 1.7277114391326904,
-    "p99": 6.256067276000977,
+    "overall_risk_score": 0.7421449422836304,
+    "p95": 1.344697117805481,
+    "p99": 1.344697117805481,
     "hotspots": [
       {
         "position": [
-          0.9853237994167492,
-          0.9854190504350674
+          3.3160548133937384,
+          -2.0381056869739487
         ],
-        "score": 14.373496055603027
+        "score": 1.344697117805481
       },
       {
         "position": [
-          1.015323799416749,
-          0.9854190504350674
+          3.2260548133937386,
+          -2.0381056869739487
         ],
-        "score": 14.351231575012207
+        "score": 1.344697117805481
       },
       {
         "position": [
-          0.9853237994167492,
-          1.0154190504350673
+          3.1660548133937385,
+          -2.0981056869739487
         ],
-        "score": 14.344695091247559
+        "score": 1.344697117805481
       },
       {
         "position": [
-          1.015323799416749,
-          1.0154190504350673
+          3.1960548133937383,
+          -2.0981056869739487
         ],
-        "score": 14.32252025604248
+        "score": 1.344697117805481
       },
       {
         "position": [
-          0.9853237994167492,
-          0.9554190504350674
+          3.3460548133937387,
+          -1.9781056869739486
         ],
-        "score": 12.589255332946777
+        "score": 1.344697117805481
       }
     ],
     "coverage": {
-      "above_p95": 0.05014124293785311,
-      "above_p99": 0.010063559322033898
+      "above_p95": 0.0,
+      "above_p99": 0.0
     },
     "components": {
       "obstacle": {
-        "mean": 0.05299614369869232,
-        "p95": 0.39778196811676025,
-        "sum": 300.170166015625,
-        "share": 0.10706102955083195
+        "mean": 0.4701188802719116,
+        "p95": 0.4850999712944031,
+        "sum": 159.84042358398438,
+        "share": 0.47107981602378907
       },
       "turn": {
         "mean": 0.0,
@@ -148,10 +148,10 @@
         "share": 0.0
       },
       "trip": {
-        "mean": 0.016426634043455124,
-        "p95": 0.0,
-        "sum": 93.04045104980469,
-        "share": 0.03318453199891746
+        "mean": 0.47754329442977905,
+        "p95": 0.6081075072288513,
+        "sum": 162.36471557617188,
+        "share": 0.4785193796873901
       },
       "slip": {
         "mean": 0.0,
@@ -160,10 +160,10 @@
         "share": 0.0
       },
       "glare": {
-        "mean": 0.4255860447883606,
-        "p95": 1.61795973777771,
-        "sum": 2410.519287109375,
-        "share": 0.8597545853928518
+        "mean": 0.05029791593551636,
+        "p95": 0.2514896094799042,
+        "sum": 17.10129165649414,
+        "share": 0.05040072559040451
       },
       "physics": {
         "mean": 0.0,
@@ -174,20 +174,20 @@
     },
     "dominant_factors": [
       {
-        "factor": "glare",
-        "share": 0.8597545853928518
+        "factor": "trip",
+        "share": 0.4785193796873901
       },
       {
         "factor": "obstacle",
-        "share": 0.10706102955083195
+        "share": 0.47107981602378907
       },
       {
-        "factor": "trip",
-        "share": 0.03318453199891746
+        "factor": "glare",
+        "share": 0.05040072559040451
       }
     ],
-    "context_text": "Dominant hazards: glare (85% of total), obstacle (10% of total), trip (3% of total). Top hotspot near (0.99, 0.99). 5.0% of the floor exceeds the 95th percentile risk and 1.0% exceeds the 99th percentile.",
-    "narrative": "Overall risk in this room is low (score 0.08). Risk is concentrated in small areas: top 5% of floor cells have risk >= 1.73, top 1% >= 6.26. Approximately 5.0% of cells exceed p95 and 1.0% exceed p99. Dominant contributors: glare (85%), obstacle (10%), trip (3%).",
+    "context_text": "Dominant hazards: trip (47% of total), obstacle (47% of total), glare (5% of total). Top hotspot near (3.32, -2.04). 0.0% of the floor exceeds the 95th percentile risk and 0.0% exceeds the 99th percentile.",
+    "narrative": "Overall risk in this room is high (score 0.74). Risk is concentrated in small areas: top 5% of floor cells have risk >= 1.34, top 1% >= 1.34. Approximately 0.0% of cells exceed p95 and 0.0% exceed p99. Dominant contributors: trip (47%), obstacle (47%), glare (5%).",
     "explanation_text": "How to read this: overall_risk_score compares the average floor risk to the worst hotspots (0 = very low overall, 1 = average as risky as the worst spot). p95 and p99 are thresholds for the highest-risk 5% and 1% of floor cells. coverage.above_p95/above_p99 tell what share of the room falls into those high-risk bands. components break total risk into causes (obstacle, trip, slip, turn, glare, physics). dominant_factors lists the top contributors, and hotspots are the specific coordinates of highest risk. Semantic hazards (if enabled) inject object-detection cues into the obstacle/trip/turn components."
   },
   "explanation_text": "How to read this: overall_risk_score compares the average floor risk to the worst hotspots (0 = very low overall, 1 = average as risky as the worst spot). p95 and p99 are thresholds for the highest-risk 5% and 1% of floor cells. coverage.above_p95/above_p99 tell what share of the room falls into those high-risk bands. components break total risk into causes (obstacle, trip, slip, turn, glare, physics). dominant_factors lists the top contributors, and hotspots are the specific coordinates of highest risk. Semantic hazards (if enabled) inject object-detection cues into the obstacle/trip/turn components.",

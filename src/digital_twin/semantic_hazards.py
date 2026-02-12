@@ -17,33 +17,67 @@ from .utils_colmap import (
 
 @dataclass
 class SemanticConfig:
-    score_threshold: float = 0.55
-    mask_threshold: float = 0.5
-    frame_stride: int = 3
-    pixel_stride: int = 6
+    score_threshold: float = 0.45
+    mask_threshold: float = 0.4
+    frame_stride: int = 2
+    pixel_stride: int = 4
     low_profile_height_m: float = 0.12
+    rug_min_height_m: float = 0.01
+    rug_max_height_m: float = 0.08
+    rug_gradient_max_m: float = 0.04
+    rug_weight: float = 0.75
+    small_object_area_ratio: float = 0.015
+    small_object_trip_boost: float = 1.4
 
 
 HAZARD_MAP: Dict[str, Dict[str, float]] = {
     "couch": {"obstacle": 1.0, "turn": 0.2},
-    "chair": {"obstacle": 0.8, "trip": 0.4},
+    "chair": {"obstacle": 0.8, "trip": 0.5, "turn": 0.1},
     "dining table": {"obstacle": 1.0, "turn": 0.2},
     "bed": {"obstacle": 1.0, "turn": 0.2},
+    "bench": {"obstacle": 0.7, "trip": 0.3},
     "tv": {"obstacle": 0.6},
-    "potted plant": {"obstacle": 0.5, "trip": 0.3},
+    "laptop": {"trip": 0.25},
+    "mouse": {"trip": 0.2},
+    "remote": {"trip": 0.3},
+    "keyboard": {"trip": 0.3},
+    "cell phone": {"trip": 0.25},
+    "potted plant": {"obstacle": 0.6, "trip": 0.4},
     "toilet": {"obstacle": 0.9, "slip": 0.2},
     "sink": {"obstacle": 0.6, "slip": 0.2},
     "refrigerator": {"obstacle": 1.0},
     "microwave": {"obstacle": 0.4},
     "oven": {"obstacle": 0.7},
+    "toaster": {"obstacle": 0.3},
     "book": {"trip": 0.4},
-    "backpack": {"trip": 0.7},
-    "handbag": {"trip": 0.6},
-    "suitcase": {"trip": 0.7},
-    "sports ball": {"trip": 0.5},
+    "wine glass": {"trip": 0.25},
+    "fork": {"trip": 0.2},
+    "knife": {"trip": 0.2},
+    "spoon": {"trip": 0.2},
+    "backpack": {"trip": 0.8},
+    "handbag": {"trip": 0.7},
+    "suitcase": {"trip": 0.8},
+    "umbrella": {"trip": 0.4},
+    "skis": {"trip": 0.6},
+    "snowboard": {"trip": 0.6},
+    "sports ball": {"trip": 0.6},
+    "frisbee": {"trip": 0.5},
+    "baseball bat": {"trip": 0.5},
+    "baseball glove": {"trip": 0.4},
+    "skateboard": {"trip": 0.6},
+    "surfboard": {"trip": 0.6},
+    "tennis racket": {"trip": 0.4},
     "vase": {"trip": 0.4, "obstacle": 0.3},
     "bottle": {"trip": 0.3},
-    "cup": {"trip": 0.2},
+    "cup": {"trip": 0.25},
+    "bowl": {"trip": 0.25},
+    "dog": {"trip": 0.7, "obstacle": 0.3},
+    "cat": {"trip": 0.6, "obstacle": 0.25},
+    "scissors": {"trip": 0.2},
+    "clock": {"trip": 0.2},
+    "teddy bear": {"trip": 0.3},
+    "hair drier": {"trip": 0.2},
+    "toothbrush": {"trip": 0.2},
 }
 
 
@@ -72,8 +106,12 @@ def _load_model(device: str):
 
 
 def _select_device() -> str:
+    import os
     import torch
 
+    forced = os.getenv("SURESTEP_DEVICE")
+    if forced:
+        return forced
     if torch.backends.mps.is_available():
         return "mps"
     return "cuda" if torch.cuda.is_available() else "cpu"
@@ -87,6 +125,15 @@ def _mask_points(mask: np.ndarray, stride: int) -> Tuple[np.ndarray, np.ndarray]
         ys = ys[::stride]
         xs = xs[::stride]
     return ys, xs
+
+
+def _depth_gradient(depth_m: np.ndarray) -> np.ndarray:
+    if depth_m.size == 0:
+        return depth_m
+    depth_blur = cv2.GaussianBlur(depth_m, (5, 5), 0)
+    grad_x = cv2.Sobel(depth_blur, cv2.CV_32F, 1, 0, ksize=3)
+    grad_y = cv2.Sobel(depth_blur, cv2.CV_32F, 0, 1, ksize=3)
+    return np.sqrt(grad_x * grad_x + grad_y * grad_y)
 
 
 def _accumulate_hazards(
@@ -169,6 +216,7 @@ def compute_semantic_hazards(
 
     label_counts: Dict[str, int] = {}
     processed = 0
+    rug_points = 0
 
     import torch
     from torchvision.io import read_image
@@ -196,6 +244,7 @@ def compute_semantic_hazards(
         if depth is None:
             continue
         depth_m = depth.astype(np.float32) / 1000.0
+        grad = _depth_gradient(depth_m)
 
         with torch.no_grad():
             img_tensor = read_image(str(frame_path))
@@ -221,6 +270,10 @@ def compute_semantic_hazards(
             ys, xs = _mask_points(mask_bin, config.pixel_stride)
             if ys.size == 0:
                 continue
+            area_ratio = float(np.count_nonzero(mask_bin)) / float(mask_bin.size)
+            if area_ratio < config.small_object_area_ratio and "trip" in hazard_weights:
+                hazard_weights = dict(hazard_weights)
+                hazard_weights["trip"] *= config.small_object_trip_boost
 
             z = depth_m[ys, xs]
             valid = z > 0
@@ -261,6 +314,40 @@ def compute_semantic_hazards(
                 low_mask,
             )
 
+        # Rug-like heuristic: low-profile, flat surfaces slightly above the floor
+        ys, xs = _mask_points(depth_m > 0, config.pixel_stride)
+        if ys.size:
+            z = depth_m[ys, xs]
+            x_cam = (xs - cx) * z / fx
+            y_cam = (ys - cy) * z / fy
+            pts_cam = np.stack([x_cam, y_cam, z], axis=1)
+            pts_world = (extrinsic[:3, :3] @ pts_cam.T).T + extrinsic[:3, 3]
+
+            heights = pts_world[:, 2] - floor_z
+            flat = grad[ys, xs] <= config.rug_gradient_max_m
+            rug_mask = (
+                (heights >= config.rug_min_height_m)
+                & (heights <= config.rug_max_height_m)
+                & flat
+            )
+            if np.any(rug_mask):
+                grid_x = ((pts_world[:, 0] - min_xy[0]) / grid_size).astype(int)
+                grid_y = ((pts_world[:, 1] - min_xy[1]) / grid_size).astype(int)
+                valid_grid = (
+                    (grid_x >= 0)
+                    & (grid_y >= 0)
+                    & (grid_x < grid_shape[1])
+                    & (grid_y < grid_shape[0])
+                )
+                valid_mask = rug_mask & valid_grid
+                if np.any(valid_mask):
+                    np.add.at(
+                        hazard_grids["trip"],
+                        (grid_y[valid_mask], grid_x[valid_mask]),
+                        config.rug_weight,
+                    )
+                    rug_points += int(np.count_nonzero(valid_mask))
+
         processed += 1
 
     for key in hazard_grids:
@@ -273,6 +360,7 @@ def compute_semantic_hazards(
         summary = {
             "frames_processed": processed,
             "labels_detected": label_counts,
+            "rug_like_points": rug_points,
         }
         summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
 

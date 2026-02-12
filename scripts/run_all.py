@@ -378,6 +378,12 @@ def _process_room(
                 frame_stride=args.semantic_frame_stride,
                 pixel_stride=args.semantic_pixel_stride,
                 low_profile_height_m=args.semantic_low_height,
+                rug_min_height_m=args.semantic_rug_min_height,
+                rug_max_height_m=args.semantic_rug_max_height,
+                rug_gradient_max_m=args.semantic_rug_gradient_max,
+                rug_weight=args.semantic_rug_weight,
+                small_object_area_ratio=args.semantic_small_object_area,
+                small_object_trip_boost=args.semantic_small_object_trip_boost,
             )
             compute_semantic_hazards(
                 workdir=workdir,
@@ -408,6 +414,7 @@ def _process_room(
         mesh_video = workdir / "mesh_preview.mp4"
         run(
             [
+                sys.executable,
                 str(render_script),
                 "--mesh",
                 str(final_mesh),
@@ -502,11 +509,17 @@ def main() -> None:
     parser.add_argument("--no-auto-scale", dest="auto_scale", action="store_false", help="Disable auto-scale priors")
     parser.add_argument("--no-mesh-video", action="store_true", help="Skip mesh preview video")
     parser.add_argument("--no-semantic", action="store_true", help="Skip semantic hazard detection")
-    parser.add_argument("--semantic-score-threshold", type=float, default=0.55)
-    parser.add_argument("--semantic-mask-threshold", type=float, default=0.5)
-    parser.add_argument("--semantic-frame-stride", type=int, default=3)
-    parser.add_argument("--semantic-pixel-stride", type=int, default=6)
+    parser.add_argument("--semantic-score-threshold", type=float, default=0.45)
+    parser.add_argument("--semantic-mask-threshold", type=float, default=0.4)
+    parser.add_argument("--semantic-frame-stride", type=int, default=2)
+    parser.add_argument("--semantic-pixel-stride", type=int, default=4)
     parser.add_argument("--semantic-low-height", type=float, default=0.12)
+    parser.add_argument("--semantic-rug-min-height", type=float, default=0.01)
+    parser.add_argument("--semantic-rug-max-height", type=float, default=0.08)
+    parser.add_argument("--semantic-rug-gradient-max", type=float, default=0.04)
+    parser.add_argument("--semantic-rug-weight", type=float, default=0.75)
+    parser.add_argument("--semantic-small-object-area", type=float, default=0.015)
+    parser.add_argument("--semantic-small-object-trip-boost", type=float, default=1.4)
     args = parser.parse_args()
 
     if args.keragon:

@@ -103,17 +103,25 @@ If the run already computed `risk_components.npz`, the overlay highlights obstac
 
 ## Semantic hazards (object recognition)
 
-By default, `run_all.py` runs an object-detection pass (Mask R-CNN) to tag common household objects and project them into the floor grid. This improves obstacle/trip coverage for things like furniture, tables, chairs, and clutter even if the mesh is coarse.
+By default, `run_all.py` runs an object-detection pass (Mask R-CNN) to tag common household objects and project them into the floor grid. This improves obstacle/trip coverage for things like furniture, tables, chairs, and clutter even if the mesh is coarse. A rug-like heuristic also boosts low-profile, flat patches just above the floor.
 
 You can disable it with `--no-semantic`, or adjust detection density with:
 
 ```
---semantic-score-threshold 0.55
---semantic-frame-stride 3
---semantic-pixel-stride 6
+--semantic-score-threshold 0.45
+--semantic-frame-stride 2
+--semantic-pixel-stride 4
+--semantic-rug-min-height 0.01
+--semantic-rug-max-height 0.08
+--semantic-rug-gradient-max 0.04
+--semantic-rug-weight 0.75
+--semantic-small-object-area 0.015
+--semantic-small-object-trip-boost 1.4
 ```
 
 When enabled, the run writes `semantic_hazards.npz` and `semantic_hazards.json` in the workdir and merges them into the risk components.
+
+If object detection stalls on Apple MPS, force CPU with `SURESTEP_DEVICE=cpu`.
 
 ## Room output JSON
 
