@@ -253,6 +253,9 @@ def main() -> None:
     parser.add_argument("--no-full-floor-heat", dest="full_floor_heat", action="store_false", help="Disable full-floor heat shading")
     parser.add_argument("--full-floor-heat-alpha", type=float, default=0.45, help="Alpha for full-floor heat shading")
     parser.add_argument("--full-floor-heat-top", type=float, default=0.35, help="Top ratio for full-floor heat band")
+    parser.add_argument("--path-only", dest="path_only", action="store_true", help="Restrict overlays to walking path corridor")
+    parser.add_argument("--no-path-only", dest="path_only", action="store_false", help="Do not restrict overlays to walking path corridor")
+    parser.add_argument("--path-width", type=int, default=60, help="Half-width (px) of walking path corridor")
     parser.add_argument("--include-all-trip-slip", dest="include_all_trip_slip", action="store_true", help="Render all nonzero trip/slip cells")
     parser.add_argument("--no-include-all-trip-slip", dest="include_all_trip_slip", action="store_false", help="Allow quantile sampling for trip/slip")
     parser.add_argument("--no-minimap", dest="show_minimap", action="store_false", help="Disable mini-map inset")
@@ -265,6 +268,7 @@ def main() -> None:
         include_all_trip_slip=True,
         skip_occlusion_for_risk=True,
         full_floor_heat=False,
+        path_only=True,
     )
     args = parser.parse_args()
 
@@ -495,6 +499,7 @@ def main() -> None:
             }
         )
 
+    path_points_world: List[np.ndarray] = []
     height_diff = height_grid - floor_z
     obstacle_indices = np.column_stack(np.where(obstacle_grid == 1))
     if obstacle_indices.size:
@@ -532,6 +537,7 @@ def main() -> None:
         if path.size == 0:
             continue
         risk = compute_turn_risk(path.tolist())
+        path_points_world.append(grid_cells_to_world(path))
         add_layer(
             "turn",
             path,
@@ -624,6 +630,26 @@ def main() -> None:
                 if fallback_start < height:
                     floor_mask = np.zeros((height, width), dtype=np.uint8)
                     cv2.rectangle(floor_mask, (0, fallback_start), (width - 1, height - 1), 255, thickness=-1)
+            path_mask = None
+            if args.path_only and path_points_world:
+                path_pts = np.vstack(path_points_world)
+                proj_path, valid_path, _ = _project_points(path_pts, camera, cameras)
+                if proj_path.size:
+                    proj_path = proj_path[np.isfinite(proj_path).all(axis=1)]
+                    mask = np.zeros((height, width), dtype=np.uint8)
+                    for (u, v) in proj_path.astype(np.int32):
+                        if 0 <= u < width and 0 <= v < height:
+                            cv2.rectangle(
+                                mask,
+                                (u - args.path_width, v - args.path_width),
+                                (u + args.path_width, v + args.path_width),
+                                255,
+                                thickness=-1,
+                            )
+                    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (31, 31))
+                    mask = cv2.dilate(mask, kernel, iterations=1)
+                    if np.count_nonzero(mask) / float(height * width) >= 0.003:
+                        path_mask = mask
 
             depth_m = None
             if args.depth_occlusion and depth_dir.exists():
@@ -750,6 +776,15 @@ def main() -> None:
                             low_mask = cv2.bitwise_and(low_mask, masked)
                             mid_mask = cv2.bitwise_and(mid_mask, masked)
                             high_mask = cv2.bitwise_and(high_mask, masked)
+                    if path_mask is not None:
+                        raw_count = float(np.count_nonzero(raw_mask))
+                        masked = cv2.bitwise_and(raw_mask, path_mask)
+                        masked_count = float(np.count_nonzero(masked))
+                        if raw_count > 0 and masked_count / raw_count >= 0.05:
+                            raw_mask = masked
+                            low_mask = cv2.bitwise_and(low_mask, masked)
+                            mid_mask = cv2.bitwise_and(mid_mask, masked)
+                            high_mask = cv2.bitwise_and(high_mask, masked)
                     # If masking wiped out too much, fall back to unmasked overlay.
                     if np.count_nonzero(raw_mask) / float(height * width) < args.overlay_min_coverage:
                         raw_mask = cv2.bitwise_or(cv2.bitwise_or(low_mask, mid_mask), high_mask)
@@ -781,7 +816,7 @@ def main() -> None:
                 # If the overlay coverage is still tiny, softly shade the full floor to ensure visibility.
                 coverage = float(np.count_nonzero(risk_any_mask)) / float(height * width)
                 if coverage < 0.12:
-                    fallback_mask = floor_mask
+                    fallback_mask = path_mask if path_mask is not None else floor_mask
                     overlay[fallback_mask > 0] = (
                         overlay[fallback_mask > 0].astype(np.float32) * (1.0 - args.floor_fallback_alpha)
                         + np.array(component_colors["trip"], dtype=np.float32) * args.floor_fallback_alpha
