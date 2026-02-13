@@ -166,7 +166,7 @@ def main() -> None:
     parser.set_defaults(depth_occlusion=True)
     parser.add_argument("--depth-occlusion-tol-m", type=float, default=0.15, help="Depth occlusion tolerance (meters)")
     parser.add_argument("--depth-occlusion-tol-ratio", type=float, default=0.2, help="Depth occlusion tolerance ratio")
-    parser.add_argument("--min-v-ratio", type=float, default=0.5, help="Only draw overlay below this vertical ratio")
+    parser.add_argument("--min-v-ratio", type=float, default=0.35, help="Only draw overlay below this vertical ratio")
     args = parser.parse_args()
 
     workdir = Path(args.workdir)

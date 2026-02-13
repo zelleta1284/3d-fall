@@ -5,6 +5,7 @@ from typing import Dict, Iterable, List, Optional, Tuple
 
 import cv2
 import numpy as np
+import yaml
 
 from .simulate_risk import build_grids, load_mesh_vertices
 from .utils_colmap import (
@@ -100,6 +101,31 @@ def resolve_colmap_txt(workdir: Path) -> Optional[Path]:
         if candidate.exists():
             return candidate
     return None
+
+
+def _load_scale_transform(workdir: Path) -> Tuple[Optional[float], Optional[np.ndarray]]:
+    config_path = workdir / "config_used.yaml"
+    if not config_path.exists():
+        return None, None
+    try:
+        cfg = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return None, None
+    scale_result = cfg.get("scale_result") or {}
+    try:
+        scale = float(scale_result.get("scale", 1.0))
+    except (TypeError, ValueError):
+        return None, None
+    if scale == 1.0:
+        return None, None
+    unscaled_mesh = workdir / "mesh.ply"
+    if not unscaled_mesh.exists():
+        return scale, None
+    vertices = load_mesh_vertices(unscaled_mesh)
+    if vertices.size == 0:
+        return scale, None
+    center = np.mean(vertices, axis=0)
+    return scale, center
 
 
 def _load_model(device: str):
@@ -202,6 +228,8 @@ def compute_semantic_hazards(
     cameras = read_cameras_txt(colmap_txt / "cameras.txt")
     images = read_images_txt(colmap_txt / "images.txt")
     images_by_name = {img.name: img for img in images}
+
+    scale, center = _load_scale_transform(workdir)
 
     frame_paths = sorted(frames_dir.glob("*.jpg"))
     if not frame_paths:
@@ -332,6 +360,8 @@ def compute_semantic_hazards(
             y_cam = (ys - cy) * z / fy
             pts_cam = np.stack([x_cam, y_cam, z], axis=1)
             pts_world = (extrinsic[:3, :3] @ pts_cam.T).T + extrinsic[:3, 3]
+            if scale is not None and center is not None:
+                pts_world = center + (pts_world - center) * scale
 
             heights = pts_world[:, 2] - floor_z
             flat = grad[ys, xs] <= config.rug_gradient_max_m

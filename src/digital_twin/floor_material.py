@@ -5,6 +5,7 @@ from typing import Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
+import yaml
 
 from .simulate_risk import build_grids, load_mesh_vertices
 from .utils_colmap import (
@@ -71,12 +72,39 @@ def resolve_colmap_txt(workdir: Path) -> Optional[Path]:
     return None
 
 
+def _load_scale_transform(workdir: Path) -> Tuple[Optional[float], Optional[np.ndarray]]:
+    config_path = workdir / "config_used.yaml"
+    if not config_path.exists():
+        return None, None
+    try:
+        cfg = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return None, None
+    scale_result = cfg.get("scale_result") or {}
+    try:
+        scale = float(scale_result.get("scale", 1.0))
+    except (TypeError, ValueError):
+        return None, None
+    if scale == 1.0:
+        return None, None
+    unscaled_mesh = workdir / "mesh.ply"
+    if not unscaled_mesh.exists():
+        return scale, None
+    vertices = load_mesh_vertices(unscaled_mesh)
+    if vertices.size == 0:
+        return scale, None
+    center = np.mean(vertices, axis=0)
+    return scale, center
+
+
 def _sample_floor_points(
     depth_m: np.ndarray,
     camera: object,
     cam_params: Dict[int, Dict[str, np.ndarray]],
     floor_z: float,
     config: FloorMaterialConfig,
+    scale: Optional[float] = None,
+    center: Optional[np.ndarray] = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
     cam_id = getattr(camera, "camera_id", None)
     qvec = getattr(camera, "qvec", None)
@@ -104,6 +132,8 @@ def _sample_floor_points(
     y_cam = (ys - cy) * z / fy
     pts_cam = np.stack([x_cam, y_cam, z], axis=1)
     pts_world = (extrinsic[:3, :3] @ pts_cam.T).T + extrinsic[:3, 3]
+    if scale is not None and center is not None:
+        pts_world = center + (pts_world - center) * scale
 
     heights = pts_world[:, 2] - floor_z
     floor_mask = (heights >= config.floor_height_min_m) & (heights <= config.floor_height_max_m)
@@ -167,6 +197,8 @@ def infer_floor_material(
     images = read_images_txt(colmap_txt / "images.txt")
     images_by_name = {img.name: img for img in images}
 
+    scale, center = _load_scale_transform(workdir)
+
     frame_paths = sorted(frames_dir.glob("*.jpg"))
     if not frame_paths:
         print("Floor material inference skipped: no frames")
@@ -193,7 +225,7 @@ def infer_floor_material(
             continue
         depth_m = depth.astype(np.float32) / 1000.0
 
-        pix, _ = _sample_floor_points(depth_m, image, cameras, floor_z, config)
+        pix, _ = _sample_floor_points(depth_m, image, cameras, floor_z, config, scale, center)
         if pix.size == 0:
             continue
 
