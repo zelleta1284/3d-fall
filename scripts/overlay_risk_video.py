@@ -216,7 +216,7 @@ def main() -> None:
     parser.add_argument("--output", required=True, help="Path for overlay video")
     parser.add_argument("--fps", type=float, default=2.0, help="Frame sampling rate used by run_all")
     parser.add_argument("--alpha", type=float, default=1.0, help="Overlay alpha")
-    parser.add_argument("--max-points", type=int, default=4000, help="Max grid points to project each frame")
+    parser.add_argument("--max-points", type=int, default=20000, help="Max grid points to project each frame")
     parser.add_argument("--heat-quantile", type=float, default=0.7, help="Quantile threshold for heat points")
     parser.add_argument("--component-quantile", type=float, default=0.8, help="Quantile threshold for component points")
     parser.add_argument("--point-radius-min", type=int, default=10, help="Minimum overlay point radius")
@@ -264,7 +264,7 @@ def main() -> None:
         show_grade=True,
         include_all_trip_slip=True,
         skip_occlusion_for_risk=True,
-        full_floor_heat=True,
+        full_floor_heat=False,
     )
     args = parser.parse_args()
 
@@ -357,7 +357,7 @@ def main() -> None:
                 continue
             limit = max(np.percentile(arr, 95), arr.max(), 1e-6)
             norm_vals = arr / limit
-            if args.include_all_trip_slip and name in {"trip", "slip"}:
+            if args.include_all_trip_slip and name in {"trip", "slip", "obstacle"}:
                 idx = np.where(arr > 0)[0]
             else:
                 thresh = np.quantile(norm_vals, args.component_quantile) if np.any(norm_vals > 0) else 1.0
@@ -395,7 +395,7 @@ def main() -> None:
                 continue
             limit = max(np.percentile(arr, 95), arr.max(), 1e-6)
             norm_vals = arr / limit
-            if args.include_all_trip_slip and name in {"trip", "slip"}:
+            if args.include_all_trip_slip and name in {"trip", "slip", "obstacle"}:
                 idx = np.where(arr > 0)[0]
             else:
                 idx = np.where(arr > 0)[0]
@@ -731,7 +731,8 @@ def main() -> None:
                         mask = raw_mask
                     mask = cv2.GaussianBlur(mask, (0, 0), 3)
                     fill_color = np.array(base_color, dtype=np.float32)
-                    alpha = 0.82 if is_trip else 0.88
+                    base_alpha = 0.65 if is_trip else 0.7
+                    alpha = float(np.clip(base_alpha + 0.25 * float(np.mean(values)), 0.55, 0.9))
                     if name == "hotspot":
                         t = frame_idx / max(video_fps, 1.0)
                         pulse = 0.6 + 0.4 * np.sin(2.0 * np.pi * args.pulse_speed * t)
