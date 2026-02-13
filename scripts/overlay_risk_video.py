@@ -249,6 +249,10 @@ def main() -> None:
     parser.add_argument("--skip-occlusion-for-risk", action="store_true", help="Skip depth occlusion for trip/slip/hotspot layers")
     parser.add_argument("--floor-fallback-alpha", type=float, default=0.35, help="Alpha for floor-wide fallback shading")
     parser.add_argument("--bottom-fallback", type=float, default=0.45, help="Bottom-frame fallback ratio for floor mask")
+    parser.add_argument("--full-floor-heat", dest="full_floor_heat", action="store_true", help="Overlay full-floor heat shading")
+    parser.add_argument("--no-full-floor-heat", dest="full_floor_heat", action="store_false", help="Disable full-floor heat shading")
+    parser.add_argument("--full-floor-heat-alpha", type=float, default=0.45, help="Alpha for full-floor heat shading")
+    parser.add_argument("--full-floor-heat-top", type=float, default=0.35, help="Top ratio for full-floor heat band")
     parser.add_argument("--include-all-trip-slip", dest="include_all_trip_slip", action="store_true", help="Render all nonzero trip/slip cells")
     parser.add_argument("--no-include-all-trip-slip", dest="include_all_trip_slip", action="store_false", help="Allow quantile sampling for trip/slip")
     parser.add_argument("--no-minimap", dest="show_minimap", action="store_false", help="Disable mini-map inset")
@@ -260,6 +264,7 @@ def main() -> None:
         show_grade=True,
         include_all_trip_slip=True,
         skip_occlusion_for_risk=True,
+        full_floor_heat=True,
     )
     args = parser.parse_args()
 
@@ -532,6 +537,23 @@ def main() -> None:
     if mini_trip is None:
         mini_trip = heatmap.astype(np.float32)
     minimap = _render_minimap(mini_trip, mini_slip, mini_heat if args.show_heat else None, args.minimap_size, component_colors)
+    # Precompute a dense floor heat image (trip + slip) for full-floor shading.
+    floor_heat = None
+    if mini_trip is not None or mini_slip is not None:
+        base = np.zeros_like(mini_trip if mini_trip is not None else mini_slip, dtype=np.float32)
+        if mini_trip is not None:
+            base += mini_trip.astype(np.float32)
+        if mini_slip is not None:
+            base += mini_slip.astype(np.float32)
+        if base.max() <= 0 and semantic_path.exists():
+            sem = np.load(semantic_path)
+            if "trip" in sem:
+                base += sem["trip"].astype(np.float32)
+            if "slip" in sem:
+                base += sem["slip"].astype(np.float32)
+        if base.max() > 0:
+            base = base / base.max()
+            floor_heat = (plt.get_cmap("inferno")(np.clip(base, 0, 1))[:, :, :3] * 255).astype(np.uint8)
 
     cameras = _parse_cameras_txt(colmap_txt / "cameras.txt")
     images = _parse_images_txt(colmap_txt / "images.txt")
@@ -767,6 +789,18 @@ def main() -> None:
                     blended = cv2.addWeighted(inset, args.minimap_alpha, roi, 1.0 - args.minimap_alpha, 0)
                     frame[y1:y1 + inset_h, x1:x1 + inset_w] = blended
                     cv2.rectangle(frame, (x1 - 2, y1 - 2), (x1 + inset_w + 2, y1 + inset_h + 2), (255, 255, 255), 1)
+            if args.full_floor_heat and floor_heat is not None:
+                y_start = int(height * args.full_floor_heat_top)
+                if y_start < height:
+                    heat_band = cv2.resize(floor_heat, (width, height - y_start), interpolation=cv2.INTER_NEAREST)
+                    heat_roi = frame[y_start:height, 0:width]
+                    if floor_mask is not None:
+                        mask = floor_mask[y_start:height, 0:width]
+                        blended = cv2.addWeighted(heat_band, args.full_floor_heat_alpha, heat_roi, 1.0 - args.full_floor_heat_alpha, 0)
+                        heat_roi[mask > 0] = blended[mask > 0]
+                    else:
+                        blended = cv2.addWeighted(heat_band, args.full_floor_heat_alpha, heat_roi, 1.0 - args.full_floor_heat_alpha, 0)
+                        frame[y_start:height, 0:width] = blended
         if args.show_split and frame_idx < split_frames:
             split_x = width // 2
             combined = raw_frame.copy()
