@@ -27,6 +27,12 @@ class SemanticConfig:
     rug_max_height_m: float = 0.08
     rug_gradient_max_m: float = 0.04
     rug_weight: float = 0.75
+    rug_slip_weight: float = 0.6
+    table_min_height_m: float = 0.35
+    table_max_height_m: float = 0.9
+    table_slope_max: float = 0.06
+    table_weight: float = 0.5
+    rug_texture_quantile: float = 0.85
     small_object_area_ratio: float = 0.015
     small_object_trip_boost: float = 1.4
 
@@ -35,7 +41,7 @@ HAZARD_MAP: Dict[str, Dict[str, float]] = {
     # Bedroom / living room
     "couch": {"obstacle": 1.0, "turn": 0.2},
     "chair": {"obstacle": 0.8, "trip": 0.5, "turn": 0.1},
-    "dining table": {"obstacle": 1.0, "turn": 0.2},
+    "dining table": {"obstacle": 1.0, "turn": 0.2, "trip": 0.4},
     "bed": {"obstacle": 1.0, "turn": 0.2},
     "bench": {"obstacle": 0.7, "trip": 0.3},
     "tv": {"obstacle": 0.6},
@@ -211,6 +217,7 @@ def compute_semantic_hazards(
     summary_path: Optional[Path] = None,
     config: Optional[SemanticConfig] = None,
     rug_only: bool = False,
+    max_frames: Optional[int] = None,
 ) -> Optional[Path]:
     if config is None:
         config = SemanticConfig()
@@ -248,7 +255,7 @@ def compute_semantic_hazards(
         categories = []
 
     vertices = load_mesh_vertices(mesh_path)
-    obstacle_grid, _, min_xy, floor_z = build_grids(vertices, grid_size, obstacle_height_m)
+    obstacle_grid, height_grid, min_xy, floor_z = build_grids(vertices, grid_size, obstacle_height_m)
     grid_shape = obstacle_grid.shape
 
     hazard_grids = {
@@ -257,6 +264,27 @@ def compute_semantic_hazards(
         "slip": np.zeros(grid_shape, dtype=np.float32),
         "turn": np.zeros(grid_shape, dtype=np.float32),
     }
+
+    # Fast surface heuristics from mesh heights (tables/rugs).
+    height_diff = height_grid - floor_z
+    grad_y, grad_x = np.gradient(height_diff)
+    slope = np.sqrt(grad_x * grad_x + grad_y * grad_y)
+    table_mask = (
+        (height_diff >= config.table_min_height_m)
+        & (height_diff <= config.table_max_height_m)
+        & (slope <= config.table_slope_max)
+    )
+    if np.any(table_mask):
+        hazard_grids["trip"][table_mask] += config.table_weight
+
+    rug_mesh_mask = (
+        (height_diff >= config.rug_min_height_m)
+        & (height_diff <= config.rug_max_height_m)
+        & (slope <= config.rug_gradient_max_m)
+    )
+    if np.any(rug_mesh_mask):
+        hazard_grids["trip"][rug_mesh_mask] += config.rug_weight
+        hazard_grids["slip"][rug_mesh_mask] += config.rug_slip_weight
 
     label_counts: Dict[str, int] = {}
     processed = 0
@@ -268,6 +296,8 @@ def compute_semantic_hazards(
     for idx, frame_path in enumerate(frame_paths):
         if idx % max(config.frame_stride, 1) != 0:
             continue
+        if max_frames is not None and processed >= max_frames:
+            break
         image_name = frame_path.name
         image = images_by_name.get(image_name)
         if image is None:
@@ -361,7 +391,7 @@ def compute_semantic_hazards(
                     low_mask,
                 )
 
-        # Rug-like heuristic: low-profile, flat surfaces slightly above the floor
+        # Rug-like heuristic: low-profile, flat, textured surfaces slightly above the floor
         ys, xs = _mask_points(depth_m > 0, config.pixel_stride)
         if ys.size:
             z = depth_m[ys, xs]
@@ -379,6 +409,15 @@ def compute_semantic_hazards(
                 & (heights <= config.rug_max_height_m)
                 & flat
             )
+
+            frame_bgr = cv2.imread(str(frame_path))
+            if frame_bgr is not None and np.any(rug_mask):
+                gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
+                texture = np.abs(cv2.Laplacian(gray, cv2.CV_32F))
+                tex_vals = texture[ys, xs]
+                thresh = np.quantile(tex_vals[rug_mask], config.rug_texture_quantile)
+                rug_mask = rug_mask & (tex_vals >= thresh)
+
             if np.any(rug_mask):
                 grid_x = ((pts_world[:, 0] - min_xy[0]) / grid_size).astype(int)
                 grid_y = ((pts_world[:, 1] - min_xy[1]) / grid_size).astype(int)
@@ -394,6 +433,11 @@ def compute_semantic_hazards(
                         hazard_grids["trip"],
                         (grid_y[valid_mask], grid_x[valid_mask]),
                         config.rug_weight,
+                    )
+                    np.add.at(
+                        hazard_grids["slip"],
+                        (grid_y[valid_mask], grid_x[valid_mask]),
+                        config.rug_slip_weight,
                     )
                     rug_points += int(np.count_nonzero(valid_mask))
 

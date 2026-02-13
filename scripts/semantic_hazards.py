@@ -27,9 +27,16 @@ def main() -> None:
     parser.add_argument("--rug-max-height", type=float, default=0.08)
     parser.add_argument("--rug-gradient-max", type=float, default=0.04)
     parser.add_argument("--rug-weight", type=float, default=0.75)
+    parser.add_argument("--rug-slip-weight", type=float, default=0.6)
+    parser.add_argument("--table-min-height", type=float, default=0.35)
+    parser.add_argument("--table-max-height", type=float, default=0.9)
+    parser.add_argument("--table-slope-max", type=float, default=0.06)
+    parser.add_argument("--table-weight", type=float, default=0.5)
+    parser.add_argument("--rug-texture-quantile", type=float, default=0.85)
     parser.add_argument("--small-object-area", type=float, default=0.015)
     parser.add_argument("--small-object-trip-boost", type=float, default=1.4)
     parser.add_argument("--rug-only", action="store_true", help="Skip object detection and use rug heuristic only")
+    parser.add_argument("--max-frames", type=int, default=None, help="Limit number of frames processed")
     args = parser.parse_args()
 
     config = SemanticConfig(
@@ -42,6 +49,12 @@ def main() -> None:
         rug_max_height_m=args.rug_max_height,
         rug_gradient_max_m=args.rug_gradient_max,
         rug_weight=args.rug_weight,
+        rug_slip_weight=args.rug_slip_weight,
+        table_min_height_m=args.table_min_height,
+        table_max_height_m=args.table_max_height,
+        table_slope_max=args.table_slope_max,
+        table_weight=args.table_weight,
+        rug_texture_quantile=args.rug_texture_quantile,
         small_object_area_ratio=args.small_object_area,
         small_object_trip_boost=args.small_object_trip_boost,
     )
@@ -55,6 +68,7 @@ def main() -> None:
         summary_path=Path(args.summary) if args.summary else None,
         config=config,
         rug_only=args.rug_only,
+        max_frames=args.max_frames,
     )
 
 
