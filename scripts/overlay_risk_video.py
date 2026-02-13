@@ -244,14 +244,22 @@ def main() -> None:
     parser.add_argument("--contrast", type=float, default=1.04, help="Cinematic contrast")
     parser.add_argument("--saturation", type=float, default=1.06, help="Cinematic saturation")
     parser.add_argument("--floor-mask-min-coverage", type=float, default=0.005, help="Minimum fraction of pixels for floor mask to be used")
-    parser.add_argument("--floor-mask-min-keep", type=float, default=0.05, help="Minimum retained fraction after floor masking")
-    parser.add_argument("--overlay-min-coverage", type=float, default=0.002, help="Minimum fraction of pixels for shaded overlay; otherwise relax masking")
+    parser.add_argument("--floor-mask-min-keep", type=float, default=0.03, help="Minimum retained fraction after floor masking")
+    parser.add_argument("--overlay-min-coverage", type=float, default=0.001, help="Minimum fraction of pixels for shaded overlay; otherwise relax masking")
+    parser.add_argument("--skip-occlusion-for-risk", action="store_true", help="Skip depth occlusion for trip/slip/hotspot layers")
+    parser.add_argument("--floor-fallback-alpha", type=float, default=0.18, help="Alpha for floor-wide fallback shading")
     parser.add_argument("--include-all-trip-slip", dest="include_all_trip_slip", action="store_true", help="Render all nonzero trip/slip cells")
     parser.add_argument("--no-include-all-trip-slip", dest="include_all_trip_slip", action="store_false", help="Allow quantile sampling for trip/slip")
     parser.add_argument("--no-minimap", dest="show_minimap", action="store_false", help="Disable mini-map inset")
     parser.add_argument("--no-split", dest="show_split", action="store_false", help="Disable split-screen intro")
     parser.add_argument("--no-grade", dest="show_grade", action="store_false", help="Disable cinematic grade/vignette")
-    parser.set_defaults(show_minimap=True, show_split=True, show_grade=True, include_all_trip_slip=True)
+    parser.set_defaults(
+        show_minimap=True,
+        show_split=True,
+        show_grade=True,
+        include_all_trip_slip=True,
+        skip_occlusion_for_risk=True,
+    )
     args = parser.parse_args()
 
     workdir = Path(args.workdir)
@@ -598,6 +606,7 @@ def main() -> None:
                         last_pose_name = pose_name
                 depth_m = last_depth
 
+            risk_any_mask = None
             for layer in component_layers:
                 proj, valid, depths = _project_points(layer["points"], camera, cameras)
                 if proj.size == 0:
@@ -622,7 +631,7 @@ def main() -> None:
                     values = values[keep]
                     depths = depths[keep]
 
-                if depth_m is not None:
+                if depth_m is not None and not (args.skip_occlusion_for_risk and layer.get("mode") != "heat"):
                     orig_len = len(values)
                     u = np.round(proj[:, 0]).astype(int)
                     v = np.round(proj[:, 1]).astype(int)
@@ -680,7 +689,7 @@ def main() -> None:
                             x0, y0 = max(0, u - r), max(0, v - r)
                             x1, y1 = min(width - 1, u + r), min(height - 1, v + r)
                             cv2.rectangle(mask, (x0, y0), (x1, y1), 255, thickness=-1)
-                    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (61, 61))
+                    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (71, 71))
                     mask = cv2.dilate(mask, kernel, iterations=1)
                     raw_mask = mask.copy()
                     if floor_mask is not None:
@@ -694,7 +703,7 @@ def main() -> None:
                         mask = raw_mask
                     mask = cv2.GaussianBlur(mask, (0, 0), 3)
                     fill_color = np.array(base_color, dtype=np.float32)
-                    alpha = 0.68 if is_trip else 0.72
+                    alpha = 0.72 if is_trip else 0.78
                     if name == "hotspot":
                         t = frame_idx / max(video_fps, 1.0)
                         pulse = 0.6 + 0.4 * np.sin(2.0 * np.pi * args.pulse_speed * t)
@@ -702,6 +711,19 @@ def main() -> None:
                     overlay[mask > 0] = (
                         overlay[mask > 0].astype(np.float32) * (1.0 - alpha)
                         + fill_color * alpha
+                    ).astype(np.uint8)
+                    if risk_any_mask is None:
+                        risk_any_mask = mask.copy()
+                    else:
+                        risk_any_mask = cv2.bitwise_or(risk_any_mask, mask)
+            if floor_mask is not None and risk_any_mask is not None:
+                # If the overlay coverage is still tiny, softly shade the full floor to ensure visibility.
+                coverage = float(np.count_nonzero(risk_any_mask)) / float(height * width)
+                if coverage < 0.02:
+                    fallback_mask = floor_mask
+                    overlay[fallback_mask > 0] = (
+                        overlay[fallback_mask > 0].astype(np.float32) * (1.0 - args.floor_fallback_alpha)
+                        + np.array(component_colors["trip"], dtype=np.float32) * args.floor_fallback_alpha
                     ).astype(np.uint8)
             fade = 1.0
             if fade_frames > 0:
