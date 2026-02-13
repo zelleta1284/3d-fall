@@ -33,6 +33,7 @@ class SemanticConfig:
     table_slope_max: float = 0.06
     table_weight: float = 0.5
     rug_texture_quantile: float = 0.7
+    smooth_floor_trip_weight: float = 0.25
     small_object_area_ratio: float = 0.015
     small_object_trip_boost: float = 1.4
 
@@ -132,6 +133,17 @@ def _load_scale_transform(workdir: Path) -> Tuple[Optional[float], Optional[np.n
         return scale, None
     center = np.mean(vertices, axis=0)
     return scale, center
+
+
+def _load_room_metadata(workdir: Path) -> Dict[str, object]:
+    config_path = workdir / "config_used.yaml"
+    if not config_path.exists():
+        return {}
+    try:
+        cfg = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return {}
+    return cfg.get("room", {}) or {}
 
 
 def _load_model(device: str):
@@ -238,6 +250,7 @@ def compute_semantic_hazards(
     images_by_name = {img.name: img for img in images}
 
     scale, center = _load_scale_transform(workdir)
+    room_meta = _load_room_metadata(workdir)
 
     frame_paths = sorted(frames_dir.glob("*.jpg"))
     if not frame_paths:
@@ -265,7 +278,7 @@ def compute_semantic_hazards(
         "turn": np.zeros(grid_shape, dtype=np.float32),
     }
 
-    # Fast surface heuristics from mesh heights (tables/rugs).
+    # Fast surface heuristics from mesh heights (tables/rugs/smooth floors).
     height_diff = height_grid - floor_z
     grad_y, grad_x = np.gradient(height_diff)
     slope = np.sqrt(grad_x * grad_x + grad_y * grad_y)
@@ -276,6 +289,18 @@ def compute_semantic_hazards(
     )
     if np.any(table_mask):
         hazard_grids["trip"][table_mask] += config.table_weight
+
+    smooth_materials = {
+        "polished hardwood",
+        "matte hardwood",
+        "tile",
+        "vinyl",
+        "concrete",
+    }
+    floor_material = str(room_meta.get("floor_material") or "").strip().lower()
+    if floor_material in smooth_materials:
+        floor_mask = height_diff <= max(obstacle_height_m, 0.05)
+        hazard_grids["trip"][floor_mask] += config.smooth_floor_trip_weight
 
     rug_mesh_mask = (
         (height_diff >= config.rug_min_height_m)
