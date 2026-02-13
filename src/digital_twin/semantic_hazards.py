@@ -23,16 +23,16 @@ class SemanticConfig:
     frame_stride: int = 2
     pixel_stride: int = 4
     low_profile_height_m: float = 0.12
-    rug_min_height_m: float = 0.01
-    rug_max_height_m: float = 0.08
-    rug_gradient_max_m: float = 0.04
-    rug_weight: float = 0.75
-    rug_slip_weight: float = 0.6
+    rug_min_height_m: float = 0.0
+    rug_max_height_m: float = 0.12
+    rug_gradient_max_m: float = 0.08
+    rug_weight: float = 1.0
+    rug_slip_weight: float = 0.9
     table_min_height_m: float = 0.35
     table_max_height_m: float = 0.9
     table_slope_max: float = 0.06
     table_weight: float = 0.5
-    rug_texture_quantile: float = 0.85
+    rug_texture_quantile: float = 0.7
     small_object_area_ratio: float = 0.015
     small_object_trip_boost: float = 1.4
 
@@ -411,12 +411,19 @@ def compute_semantic_hazards(
             )
 
             frame_bgr = cv2.imread(str(frame_path))
-            if frame_bgr is not None and np.any(rug_mask):
+            if frame_bgr is not None:
                 gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
                 texture = np.abs(cv2.Laplacian(gray, cv2.CV_32F))
                 tex_vals = texture[ys, xs]
-                thresh = np.quantile(tex_vals[rug_mask], config.rug_texture_quantile)
-                rug_mask = rug_mask & (tex_vals >= thresh)
+                if np.any(rug_mask):
+                    thresh = np.quantile(tex_vals[rug_mask], config.rug_texture_quantile)
+                    rug_mask = rug_mask & (tex_vals >= thresh)
+                else:
+                    # Fallback: treat highly textured low-floor regions as rug.
+                    low = heights <= max(config.rug_max_height_m, 0.03)
+                    if np.any(low):
+                        thresh = np.quantile(tex_vals[low], config.rug_texture_quantile)
+                        rug_mask = low & (tex_vals >= thresh)
 
             if np.any(rug_mask):
                 grid_x = ((pts_world[:, 0] - min_xy[0]) / grid_size).astype(int)

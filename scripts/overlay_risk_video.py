@@ -240,6 +240,7 @@ def main() -> None:
     if args.show_components and components_path.exists():
         comp_data = np.load(components_path)
         per_layer = max(50, args.max_points // max(len(component_colors), 1))
+        slip_layers: List[Dict[str, np.ndarray]] = []
         for name, color in component_colors.items():
             if name not in comp_data:
                 continue
@@ -252,15 +253,52 @@ def main() -> None:
             idx = np.where(norm_vals >= thresh)[0]
             if idx.size > per_layer:
                 idx = np.random.choice(idx, size=per_layer, replace=False)
-            component_layers.append(
-                {
-                    "name": name,
-                    "points": floor_pts[idx],
-                    "values": np.clip(norm_vals[idx], 0.0, 1.0),
-                    "color": np.array(color, dtype=np.int32),
-                    "mode": "component",
-                }
-            )
+            layer = {
+                "name": name,
+                "points": floor_pts[idx],
+                "values": np.clip(norm_vals[idx], 0.0, 1.0),
+                "color": np.array(color, dtype=np.int32),
+                "mode": "component",
+            }
+            if name == "slip":
+                slip_layers.append(layer)
+            else:
+                component_layers.append(layer)
+        component_layers.extend(slip_layers)
+
+    # Add semantic hazard layers directly (helps rugs/tables show up even when risk is diffuse).
+    semantic_path = workdir / "semantic_hazards.npz"
+    if args.show_components and semantic_path.exists():
+        sem = np.load(semantic_path)
+        per_layer = max(1200, args.max_points)
+        semantic_slip_layers: List[Dict[str, np.ndarray]] = []
+        for name, color in component_colors.items():
+            if name not in sem:
+                continue
+            arr = sem[name]
+            if name in {"trip", "slip"}:
+                kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (21, 21))
+                arr = cv2.dilate(arr.astype(np.float32), kernel, iterations=1)
+            arr = arr.ravel()
+            if not np.any(arr > 0):
+                continue
+            limit = max(np.percentile(arr, 95), arr.max(), 1e-6)
+            norm_vals = arr / limit
+            idx = np.where(arr > 0)[0]
+            if idx.size > per_layer:
+                idx = idx[np.argsort(norm_vals[idx])[::-1][:per_layer]]
+            layer = {
+                "name": f"semantic_{name}",
+                "points": floor_pts[idx],
+                "values": np.clip(norm_vals[idx], 0.0, 1.0),
+                "color": np.array(color, dtype=np.int32),
+                "mode": "component",
+            }
+            if name == "slip":
+                semantic_slip_layers.append(layer)
+            else:
+                component_layers.append(layer)
+        component_layers.extend(semantic_slip_layers)
 
     if args.show_heat:
         heat_flat = heatmap.ravel()
@@ -446,6 +484,9 @@ def main() -> None:
                 if pts.size == 0:
                     continue
 
+                name = layer.get("name", "")
+                is_semantic = name.startswith("semantic_")
+                is_slip = "slip" in name
                 if layer.get("mode") == "heat":
                     colors = _color_map(values)
                     for (u, v), color, value in zip(pts, colors, values):
@@ -457,10 +498,18 @@ def main() -> None:
                     for (u, v), value in zip(pts, values):
                         if 0 <= u < width and 0 <= v < height:
                             radius = max(args.point_radius_min, int(args.point_radius_min + value * (args.point_radius_max - args.point_radius_min)))
+                            if is_semantic:
+                                radius = int(radius * 1.4)
+                            if is_slip:
+                                radius = int(radius * 1.6)
                             intensity = 0.4 + 0.6 * value
+                            if is_semantic:
+                                intensity = min(1.0, intensity + 0.2)
                             color = tuple(
                                 min(255, int(base_color[i] * intensity + 10)) for i in range(3)
                             )
+                            if is_slip:
+                                cv2.circle(overlay, (u, v), radius + 2, (255, 255, 255), thickness=2)
                             cv2.circle(overlay, (u, v), radius, color, thickness=-1)
             frame = cv2.addWeighted(overlay, args.alpha, frame, 1.0 - args.alpha, 0)
             if args.legend and component_layers:
