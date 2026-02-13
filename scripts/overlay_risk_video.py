@@ -230,7 +230,8 @@ def main() -> None:
     parser.set_defaults(depth_occlusion=True)
     parser.add_argument("--depth-occlusion-tol-m", type=float, default=0.15, help="Depth occlusion tolerance (meters)")
     parser.add_argument("--depth-occlusion-tol-ratio", type=float, default=0.2, help="Depth occlusion tolerance ratio")
-    parser.add_argument("--min-v-ratio", type=float, default=0.35, help="Only draw overlay below this vertical ratio")
+    parser.add_argument("--depth-min-keep", type=float, default=0.1, help="Minimum fraction of points to keep after depth occlusion")
+    parser.add_argument("--min-v-ratio", type=float, default=0.2, help="Only draw overlay below this vertical ratio")
     parser.add_argument("--shaded-only", dest="shaded_only", action="store_true", help="Render shaded regions only (no dots)")
     parser.add_argument("--no-shaded-only", dest="shaded_only", action="store_false", help="Render dots/points")
     parser.set_defaults(shaded_only=True)
@@ -621,6 +622,7 @@ def main() -> None:
                     depths = depths[keep]
 
                 if depth_m is not None:
+                    orig_len = len(values)
                     u = np.round(proj[:, 0]).astype(int)
                     v = np.round(proj[:, 1]).astype(int)
                     inside = (u >= 0) & (u < depth_m.shape[1]) & (v >= 0) & (v < depth_m.shape[0])
@@ -638,8 +640,13 @@ def main() -> None:
                         depth_colmap_m <= depth_at * (1.0 + args.depth_occlusion_tol_ratio) + args.depth_occlusion_tol_m
                     )
                     if np.any(visible):
-                        proj = proj[visible]
-                        values = values[visible]
+                        kept = int(np.count_nonzero(visible))
+                        if orig_len > 0 and kept / float(orig_len) < args.depth_min_keep:
+                            proj = proj_unoccluded
+                            values = values_unoccluded
+                        else:
+                            proj = proj[visible]
+                            values = values[visible]
                     else:
                         proj = proj_unoccluded
                         values = values_unoccluded
