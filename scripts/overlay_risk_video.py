@@ -733,12 +733,12 @@ def main() -> None:
                                 cv2.rectangle(mid_mask, (x0, y0), (x1, y1), 255, thickness=-1)
                             else:
                                 cv2.rectangle(low_mask, (x0, y0), (x1, y1), 255, thickness=-1)
-                    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (71, 71))
+                    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (41, 41))
                     low_mask = cv2.dilate(low_mask, kernel, iterations=1)
                     mid_mask = cv2.dilate(mid_mask, kernel, iterations=1)
                     high_mask = cv2.dilate(high_mask, kernel, iterations=1)
                     raw_mask = cv2.bitwise_or(cv2.bitwise_or(low_mask, mid_mask), high_mask)
-                    if floor_mask is not None:
+                    if floor_mask is not None and not is_semantic:
                         raw_count = float(np.count_nonzero(raw_mask))
                         low_mask = cv2.bitwise_and(low_mask, floor_mask)
                         mid_mask = cv2.bitwise_and(mid_mask, floor_mask)
@@ -757,10 +757,10 @@ def main() -> None:
                     mid_mask = cv2.GaussianBlur(mid_mask, (0, 0), 3)
                     high_mask = cv2.GaussianBlur(high_mask, (0, 0), 3)
                     fill_color = np.array(base_color, dtype=np.float32)
-                    base_alpha = 0.55 if is_trip else 0.6
+                    base_alpha = 0.45 if is_trip else 0.5
                     alpha_low = base_alpha
-                    alpha_mid = base_alpha + 0.2
-                    alpha_high = base_alpha + 0.35
+                    alpha_mid = base_alpha + 0.15
+                    alpha_high = base_alpha + 0.25
                     if name == "hotspot":
                         t = frame_idx / max(video_fps, 1.0)
                         pulse = 0.6 + 0.4 * np.sin(2.0 * np.pi * args.pulse_speed * t)
