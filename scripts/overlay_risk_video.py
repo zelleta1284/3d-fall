@@ -89,7 +89,7 @@ def _project_points(
     points: np.ndarray,
     camera: Dict[str, np.ndarray],
     cam_params: Dict[int, Dict[str, np.ndarray]],
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     qvec = camera["qvec"]
     tvec = camera["tvec"]
     cam_id = camera["camera_id"]
@@ -99,7 +99,7 @@ def _project_points(
     valid = pts_cam[:, 2] > 0
     pts_cam = pts_cam[valid]
     if pts_cam.size == 0:
-        return np.empty((0, 2), dtype=np.float32), np.zeros((0,), dtype=bool)
+        return np.empty((0, 2), dtype=np.float32), np.zeros((0,), dtype=bool), np.empty((0,), dtype=np.float32)
     x = pts_cam[:, 0] / pts_cam[:, 2]
     y = pts_cam[:, 1] / pts_cam[:, 2]
     model = cam["model"]
@@ -135,7 +135,7 @@ def _project_points(
         fx, fy, cx, cy = params[:4]
     u = x * fx + cx
     v = y * fy + cy
-    return np.column_stack([u, v]), valid
+    return np.column_stack([u, v]), valid, pts_cam[:, 2]
 
 
 def _color_map(values: np.ndarray) -> np.ndarray:
@@ -161,6 +161,12 @@ def main() -> None:
     parser.add_argument("--no-components", dest="show_components", action="store_false", help="Hide component layers")
     parser.set_defaults(show_components=True)
     parser.add_argument("--legend", action="store_true", help="Draw legend")
+    parser.add_argument("--depth-occlusion", dest="depth_occlusion", action="store_true", help="Hide overlays behind nearer surfaces")
+    parser.add_argument("--no-depth-occlusion", dest="depth_occlusion", action="store_false", help="Disable depth occlusion")
+    parser.set_defaults(depth_occlusion=True)
+    parser.add_argument("--depth-occlusion-tol-m", type=float, default=0.15, help="Depth occlusion tolerance (meters)")
+    parser.add_argument("--depth-occlusion-tol-ratio", type=float, default=0.2, help="Depth occlusion tolerance ratio")
+    parser.add_argument("--min-v-ratio", type=float, default=0.5, help="Only draw overlay below this vertical ratio")
     args = parser.parse_args()
 
     workdir = Path(args.workdir)
@@ -176,6 +182,7 @@ def main() -> None:
     mesh_path = workdir / "mesh_scaled_auto.ply"
     config_path = workdir / "config_used.yaml"
 
+    depth_dir = workdir / "depth"
     if not all(p.exists() for p in (heatmap_path, frames_dir, colmap_txt, mesh_path, room_interp, config_path)):
         raise RuntimeError("Missing required outputs in workdir.")
 
@@ -362,6 +369,8 @@ def main() -> None:
         raise RuntimeError("Failed to open VideoWriter for overlay.")
 
     last_camera: Optional[Dict[str, np.ndarray]] = None
+    last_pose_name: Optional[str] = None
+    last_depth: Optional[np.ndarray] = None
     frame_idx = 0
     while True:
         ret, frame = cap.read()
@@ -376,8 +385,22 @@ def main() -> None:
             last_camera = camera
         overlay = frame.copy()
         if camera:
+            depth_m = None
+            if args.depth_occlusion and depth_dir.exists():
+                if pose_name != last_pose_name:
+                    depth_path = depth_dir / f"{Path(pose_name).stem}.png"
+                    if depth_path.exists():
+                        depth_img = cv2.imread(str(depth_path), cv2.IMREAD_UNCHANGED)
+                        if depth_img is not None:
+                            last_depth = depth_img.astype(np.float32) / 1000.0
+                            last_pose_name = pose_name
+                    else:
+                        last_depth = None
+                        last_pose_name = pose_name
+                depth_m = last_depth
+
             for layer in component_layers:
-                proj, valid = _project_points(layer["points"], camera, cameras)
+                proj, valid, depths = _project_points(layer["points"], camera, cameras)
                 if proj.size == 0:
                     continue
                 values = layer["values"][valid]
@@ -386,6 +409,38 @@ def main() -> None:
                     continue
                 proj = proj[finite]
                 values = values[finite]
+                depths = depths[finite]
+                # Discard points above a conservative image band (avoid wall overlays).
+                if args.min_v_ratio > 0:
+                    v_min = int(height * args.min_v_ratio)
+                    keep = proj[:, 1] >= v_min
+                    if not np.any(keep):
+                        continue
+                    proj = proj[keep]
+                    values = values[keep]
+                    depths = depths[keep]
+
+                if depth_m is not None:
+                    u = np.round(proj[:, 0]).astype(int)
+                    v = np.round(proj[:, 1]).astype(int)
+                    inside = (u >= 0) & (u < depth_m.shape[1]) & (v >= 0) & (v < depth_m.shape[0])
+                    if not np.any(inside):
+                        continue
+                    u = u[inside]
+                    v = v[inside]
+                    proj = proj[inside]
+                    values = values[inside]
+                    depths = depths[inside]
+                    depth_at = depth_m[v, u]
+                    # Convert COLMAP depth to meters if we have a scale factor
+                    depth_colmap_m = depths * (scale if scale else 1.0)
+                    visible = (depth_at > 0) & (
+                        depth_colmap_m <= depth_at * (1.0 + args.depth_occlusion_tol_ratio) + args.depth_occlusion_tol_m
+                    )
+                    if not np.any(visible):
+                        continue
+                    proj = proj[visible]
+                    values = values[visible]
                 proj = np.nan_to_num(proj, nan=-1e6, posinf=-1e6, neginf=-1e6)
                 pts = proj.astype(np.int32)
                 if pts.size == 0:
