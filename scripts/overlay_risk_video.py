@@ -215,7 +215,7 @@ def main() -> None:
     parser.add_argument("--workdir", required=True, help="Workdir that produced run_all outputs")
     parser.add_argument("--output", required=True, help="Path for overlay video")
     parser.add_argument("--fps", type=float, default=2.0, help="Frame sampling rate used by run_all")
-    parser.add_argument("--alpha", type=float, default=0.85, help="Overlay alpha")
+    parser.add_argument("--alpha", type=float, default=1.0, help="Overlay alpha")
     parser.add_argument("--max-points", type=int, default=4000, help="Max grid points to project each frame")
     parser.add_argument("--heat-quantile", type=float, default=0.7, help="Quantile threshold for heat points")
     parser.add_argument("--component-quantile", type=float, default=0.8, help="Quantile threshold for component points")
@@ -247,7 +247,8 @@ def main() -> None:
     parser.add_argument("--floor-mask-min-keep", type=float, default=0.03, help="Minimum retained fraction after floor masking")
     parser.add_argument("--overlay-min-coverage", type=float, default=0.001, help="Minimum fraction of pixels for shaded overlay; otherwise relax masking")
     parser.add_argument("--skip-occlusion-for-risk", action="store_true", help="Skip depth occlusion for trip/slip/hotspot layers")
-    parser.add_argument("--floor-fallback-alpha", type=float, default=0.18, help="Alpha for floor-wide fallback shading")
+    parser.add_argument("--floor-fallback-alpha", type=float, default=0.35, help="Alpha for floor-wide fallback shading")
+    parser.add_argument("--bottom-fallback", type=float, default=0.45, help="Bottom-frame fallback ratio for floor mask")
     parser.add_argument("--include-all-trip-slip", dest="include_all_trip_slip", action="store_true", help="Render all nonzero trip/slip cells")
     parser.add_argument("--no-include-all-trip-slip", dest="include_all_trip_slip", action="store_false", help="Allow quantile sampling for trip/slip")
     parser.add_argument("--no-minimap", dest="show_minimap", action="store_false", help="Disable mini-map inset")
@@ -324,11 +325,11 @@ def main() -> None:
 
     components_path = risk_dir / "risk_components.npz"
     component_colors: Dict[str, Tuple[int, int, int]] = {
-        "obstacle": (0, 0, 255),   # red
-        "trip": (0, 85, 255),      # deep orange
-        "slip": (255, 0, 0),       # blue
-        "turn": (0, 255, 0),       # green
-        "physics": (255, 0, 255),  # magenta
+        "obstacle": (0, 0, 255),    # red
+        "trip": (0, 140, 255),      # bright orange
+        "slip": (255, 80, 80),      # brighter blue
+        "turn": (0, 255, 0),        # green
+        "physics": (255, 0, 255),   # magenta
     }
     component_layers: List[Dict[str, np.ndarray]] = []
     mini_trip = None
@@ -591,6 +592,11 @@ def main() -> None:
                 mask = cv2.dilate(mask, kernel, iterations=1)
                 if np.count_nonzero(mask) / float(height * width) >= args.floor_mask_min_coverage:
                     floor_mask = mask
+            if floor_mask is None:
+                fallback_start = int(height * args.bottom_fallback)
+                if fallback_start < height:
+                    floor_mask = np.zeros((height, width), dtype=np.uint8)
+                    cv2.rectangle(floor_mask, (0, fallback_start), (width - 1, height - 1), 255, thickness=-1)
 
             depth_m = None
             if args.depth_occlusion and depth_dir.exists():
@@ -703,7 +709,7 @@ def main() -> None:
                         mask = raw_mask
                     mask = cv2.GaussianBlur(mask, (0, 0), 3)
                     fill_color = np.array(base_color, dtype=np.float32)
-                    alpha = 0.72 if is_trip else 0.78
+                    alpha = 0.82 if is_trip else 0.88
                     if name == "hotspot":
                         t = frame_idx / max(video_fps, 1.0)
                         pulse = 0.6 + 0.4 * np.sin(2.0 * np.pi * args.pulse_speed * t)
@@ -719,7 +725,7 @@ def main() -> None:
             if floor_mask is not None and risk_any_mask is not None:
                 # If the overlay coverage is still tiny, softly shade the full floor to ensure visibility.
                 coverage = float(np.count_nonzero(risk_any_mask)) / float(height * width)
-                if coverage < 0.02:
+                if coverage < 0.12:
                     fallback_mask = floor_mask
                     overlay[fallback_mask > 0] = (
                         overlay[fallback_mask > 0].astype(np.float32) * (1.0 - args.floor_fallback_alpha)
