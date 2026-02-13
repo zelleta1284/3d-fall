@@ -330,16 +330,16 @@ def main() -> None:
 
     components_path = risk_dir / "risk_components.npz"
     component_colors: Dict[str, Tuple[int, int, int]] = {
-        "obstacle": (0, 0, 255),    # red
-        "trip": (0, 140, 255),      # bright orange
-        "slip": (255, 80, 80),      # brighter blue
-        "turn": (0, 255, 0),        # green
-        "physics": (255, 0, 255),   # magenta
+        "obstacle": (0, 60, 255),    # tables / edges (red)
+        "trip": (0, 160, 255),       # trip (orange)
+        "slip": (255, 130, 40),      # slip (cyan)
+        "turn": (0, 255, 120),       # turn (green)
+        "physics": (255, 0, 255),    # physics (magenta)
     }
     semantic_color_overrides: Dict[str, Tuple[int, int, int]] = {
-        "semantic_trip": (0, 215, 255),      # rugs: yellow
-        "semantic_slip": (255, 180, 80),     # slip: light blue
-        "semantic_obstacle": (0, 0, 200),    # tables: deep red
+        "semantic_trip": (180, 0, 255),      # rugs: purple
+        "semantic_slip": (255, 200, 0),      # slick floor: teal
+        "semantic_obstacle": (0, 0, 220),    # tables: deep red
     }
     component_layers: List[Dict[str, np.ndarray]] = []
     mini_trip = None
