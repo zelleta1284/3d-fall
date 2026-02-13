@@ -210,6 +210,7 @@ def compute_semantic_hazards(
     out_path: Path,
     summary_path: Optional[Path] = None,
     config: Optional[SemanticConfig] = None,
+    rug_only: bool = False,
 ) -> Optional[Path]:
     if config is None:
         config = SemanticConfig()
@@ -236,10 +237,15 @@ def compute_semantic_hazards(
         print("Semantic hazards skipped: no frames")
         return None
 
-    device = _select_device()
-    model, weights = _load_model(device)
-    preprocess = weights.transforms()
-    categories: List[str] = list(weights.meta.get("categories", []))
+    if not rug_only:
+        device = _select_device()
+        model, weights = _load_model(device)
+        preprocess = weights.transforms()
+        categories: List[str] = list(weights.meta.get("categories", []))
+    else:
+        model = None
+        preprocess = None
+        categories = []
 
     vertices = load_mesh_vertices(mesh_path)
     obstacle_grid, _, min_xy, floor_z = build_grids(vertices, grid_size, obstacle_height_m)
@@ -284,73 +290,76 @@ def compute_semantic_hazards(
         depth_m = depth.astype(np.float32) / 1000.0
         grad = _depth_gradient(depth_m)
 
-        with torch.no_grad():
-            img_tensor = read_image(str(frame_path))
-            inputs = [preprocess(img_tensor).to(device)]
-            outputs = model(inputs)[0]
+        if not rug_only:
+            with torch.no_grad():
+                img_tensor = read_image(str(frame_path))
+                inputs = [preprocess(img_tensor).to(device)]
+                outputs = model(inputs)[0]
 
-        scores = outputs["scores"].detach().cpu().numpy()
-        labels = outputs["labels"].detach().cpu().numpy()
-        masks = outputs["masks"].detach().cpu().numpy()[:, 0]
+            scores = outputs["scores"].detach().cpu().numpy()
+            labels = outputs["labels"].detach().cpu().numpy()
+            masks = outputs["masks"].detach().cpu().numpy()[:, 0]
 
-        for score, label_id, mask in zip(scores, labels, masks):
-            if score < config.score_threshold:
-                continue
-            if label_id >= len(categories):
-                continue
-            label = categories[int(label_id)]
-            hazard_weights = HAZARD_MAP.get(label)
-            if not hazard_weights:
-                continue
+            for score, label_id, mask in zip(scores, labels, masks):
+                if score < config.score_threshold:
+                    continue
+                if label_id >= len(categories):
+                    continue
+                label = categories[int(label_id)]
+                hazard_weights = HAZARD_MAP.get(label)
+                if not hazard_weights:
+                    continue
 
-            label_counts[label] = label_counts.get(label, 0) + 1
-            mask_bin = mask > config.mask_threshold
-            ys, xs = _mask_points(mask_bin, config.pixel_stride)
-            if ys.size == 0:
-                continue
-            area_ratio = float(np.count_nonzero(mask_bin)) / float(mask_bin.size)
-            if area_ratio < config.small_object_area_ratio and "trip" in hazard_weights:
-                hazard_weights = dict(hazard_weights)
-                hazard_weights["trip"] *= config.small_object_trip_boost
+                label_counts[label] = label_counts.get(label, 0) + 1
+                mask_bin = mask > config.mask_threshold
+                ys, xs = _mask_points(mask_bin, config.pixel_stride)
+                if ys.size == 0:
+                    continue
+                area_ratio = float(np.count_nonzero(mask_bin)) / float(mask_bin.size)
+                if area_ratio < config.small_object_area_ratio and "trip" in hazard_weights:
+                    hazard_weights = dict(hazard_weights)
+                    hazard_weights["trip"] *= config.small_object_trip_boost
 
-            z = depth_m[ys, xs]
-            valid = z > 0
-            if not np.any(valid):
-                continue
-            ys = ys[valid]
-            xs = xs[valid]
-            z = z[valid]
+                z = depth_m[ys, xs]
+                valid = z > 0
+                if not np.any(valid):
+                    continue
+                ys = ys[valid]
+                xs = xs[valid]
+                z = z[valid]
 
-            x_cam = (xs - cx) * z / fx
-            y_cam = (ys - cy) * z / fy
-            pts_cam = np.stack([x_cam, y_cam, z], axis=1)
+                x_cam = (xs - cx) * z / fx
+                y_cam = (ys - cy) * z / fy
+                pts_cam = np.stack([x_cam, y_cam, z], axis=1)
 
-            pts_world = (extrinsic[:3, :3] @ pts_cam.T).T + extrinsic[:3, 3]
+                pts_world = (extrinsic[:3, :3] @ pts_cam.T).T + extrinsic[:3, 3]
+                if scale is not None and center is not None:
+                    pts_world = center + (pts_world - center) * scale
 
-            grid_x = ((pts_world[:, 0] - min_xy[0]) / grid_size).astype(int)
-            grid_y = ((pts_world[:, 1] - min_xy[1]) / grid_size).astype(int)
-            valid_grid = (
-                (grid_x >= 0)
-                & (grid_y >= 0)
-                & (grid_x < grid_shape[1])
-                & (grid_y < grid_shape[0])
-            )
-            if not np.any(valid_grid):
-                continue
+                grid_x = ((pts_world[:, 0] - min_xy[0]) / grid_size).astype(int)
+                grid_y = ((pts_world[:, 1] - min_xy[1]) / grid_size).astype(int)
+                valid_grid = (
+                    (grid_x >= 0)
+                    & (grid_y >= 0)
+                    & (grid_x < grid_shape[1])
+                    & (grid_y < grid_shape[0])
+                )
+                if not np.any(valid_grid):
+                    continue
 
-            grid_x = grid_x[valid_grid]
-            grid_y = grid_y[valid_grid]
-            z_world = pts_world[:, 2][valid_grid]
-            low_mask = z_world <= (floor_z + max(config.low_profile_height_m, obstacle_height_m))
+                grid_x = grid_x[valid_grid]
+                grid_y = grid_y[valid_grid]
+                z_world = pts_world[:, 2][valid_grid]
+                low_mask = z_world <= (floor_z + max(config.low_profile_height_m, obstacle_height_m))
 
-            _accumulate_hazards(
-                hazard_grids,
-                hazard_weights,
-                grid_x,
-                grid_y,
-                float(score),
-                low_mask,
-            )
+                _accumulate_hazards(
+                    hazard_grids,
+                    hazard_weights,
+                    grid_x,
+                    grid_y,
+                    float(score),
+                    low_mask,
+                )
 
         # Rug-like heuristic: low-profile, flat surfaces slightly above the floor
         ys, xs = _mask_points(depth_m > 0, config.pixel_stride)

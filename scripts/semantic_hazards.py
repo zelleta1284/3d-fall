@@ -29,6 +29,7 @@ def main() -> None:
     parser.add_argument("--rug-weight", type=float, default=0.75)
     parser.add_argument("--small-object-area", type=float, default=0.015)
     parser.add_argument("--small-object-trip-boost", type=float, default=1.4)
+    parser.add_argument("--rug-only", action="store_true", help="Skip object detection and use rug heuristic only")
     args = parser.parse_args()
 
     config = SemanticConfig(
@@ -53,6 +54,7 @@ def main() -> None:
         out_path=Path(args.out),
         summary_path=Path(args.summary) if args.summary else None,
         config=config,
+        rug_only=args.rug_only,
     )
 
 
