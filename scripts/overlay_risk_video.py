@@ -167,12 +167,9 @@ def main() -> None:
     parser.add_argument("--depth-occlusion-tol-m", type=float, default=0.15, help="Depth occlusion tolerance (meters)")
     parser.add_argument("--depth-occlusion-tol-ratio", type=float, default=0.2, help="Depth occlusion tolerance ratio")
     parser.add_argument("--min-v-ratio", type=float, default=0.35, help="Only draw overlay below this vertical ratio")
-    parser.add_argument("--screen-fallback", dest="screen_fallback", action="store_true", help="Use 2D rug/table overlay fallback")
-    parser.add_argument("--no-screen-fallback", dest="screen_fallback", action="store_false", help="Disable 2D fallback")
-    parser.set_defaults(screen_fallback=True)
-    parser.add_argument("--screen-rug-quantile", type=float, default=0.85, help="Texture quantile for rug mask")
-    parser.add_argument("--screen-table-min-area", type=float, default=0.01, help="Min table bbox area ratio")
-    parser.add_argument("--screen-table-max-area", type=float, default=0.2, help="Max table bbox area ratio")
+    parser.add_argument("--shaded-only", dest="shaded_only", action="store_true", help="Render shaded regions only (no dots)")
+    parser.add_argument("--no-shaded-only", dest="shaded_only", action="store_false", help="Render dots/points")
+    parser.set_defaults(shaded_only=True)
     args = parser.parse_args()
 
     workdir = Path(args.workdir)
@@ -324,6 +321,39 @@ def main() -> None:
                 "mode": "heat",
             }
         )
+
+    # Hotspot-only layer from risk summary (if available).
+    risk_summary_path = risk_dir / "risk_summary.json"
+    if risk_summary_path.exists():
+        try:
+            summary = yaml.safe_load(risk_summary_path.read_text(encoding="utf-8")) or {}
+            hotspots = summary.get("hotspots", [])
+            if hotspots:
+                pts = []
+                vals = []
+                for hspot in hotspots:
+                    pos = hspot.get("position")
+                    score = hspot.get("score", 1.0)
+                    if isinstance(pos, list) and len(pos) >= 2:
+                        pts.append([float(pos[0]), float(pos[1]), float(floor_z)])
+                        vals.append(float(score))
+                if pts:
+                    pts = np.array(pts, dtype=np.float32)
+                    pts = _unscale(pts)
+                    vals = np.array(vals, dtype=np.float32)
+                    if vals.size and vals.max() > 0:
+                        vals = vals / vals.max()
+                    component_layers.append(
+                        {
+                            "name": "hotspot",
+                            "points": pts,
+                            "values": vals,
+                            "color": np.array((0, 0, 255), dtype=np.int32),
+                            "mode": "component",
+                        }
+                    )
+        except Exception:
+            pass
 
     def grid_cells_to_world(indices: np.ndarray) -> np.ndarray:
         if indices.size == 0:
@@ -495,98 +525,32 @@ def main() -> None:
                 is_slip = "slip" in name
                 is_trip = "trip" in name
                 if layer.get("mode") == "heat":
+                    if not args.show_heat:
+                        continue
                     colors = _color_map(values)
                     for (u, v), color, value in zip(pts, colors, values):
                         if 0 <= u < width and 0 <= v < height:
                             radius = max(args.point_radius_min, int(args.point_radius_min + value * (args.point_radius_max - args.point_radius_min)))
                             cv2.circle(overlay, (u, v), radius, tuple(int(c) for c in color), thickness=-1)
                 else:
-                    base_color = layer["color"]
-                    # For semantic rug/table regions, build a 2D mask and dilate to create a clear overlay.
-                    if is_semantic and (is_trip or is_slip) and pts.shape[0] >= 6:
-                        mask = np.zeros((height, width), dtype=np.uint8)
-                        for (u, v), value in zip(pts, values):
-                            if 0 <= u < width and 0 <= v < height:
-                                r = max(12, int(10 + value * 20))
-                                cv2.circle(mask, (u, v), r, 255, thickness=-1)
-                        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (45, 45))
-                        mask = cv2.dilate(mask, kernel, iterations=1)
-                        fill_color = np.array(base_color, dtype=np.float32)
-                        alpha = 0.35 if is_trip else 0.45
-                        overlay[mask > 0] = (
-                            overlay[mask > 0].astype(np.float32) * (1.0 - alpha)
-                            + fill_color * alpha
-                        ).astype(np.uint8)
+                    # Only shade trip/slip/hotspot layers; skip glare/other components.
+                    if not (is_trip or is_slip or name == "hotspot" or name.startswith("semantic_")):
+                        continue
+                    base_color = layer.get("color", np.array((0, 0, 255), dtype=np.int32))
+                    mask = np.zeros((height, width), dtype=np.uint8)
                     for (u, v), value in zip(pts, values):
                         if 0 <= u < width and 0 <= v < height:
-                            radius = max(args.point_radius_min, int(args.point_radius_min + value * (args.point_radius_max - args.point_radius_min)))
-                            if is_semantic:
-                                radius = int(radius * 1.4)
-                            if is_slip:
-                                radius = int(radius * 1.6)
-                            intensity = 0.4 + 0.6 * value
-                            if is_semantic:
-                                intensity = min(1.0, intensity + 0.2)
-                            color = tuple(
-                                min(255, int(base_color[i] * intensity + 10)) for i in range(3)
-                            )
-                            if is_slip:
-                                cv2.circle(overlay, (u, v), radius + 2, (255, 255, 255), thickness=2)
-                            cv2.circle(overlay, (u, v), radius, color, thickness=-1)
-            frame = cv2.addWeighted(overlay, args.alpha, frame, 1.0 - args.alpha, 0)
-            if args.screen_fallback:
-                # Screen-space fallback for rugs/tables (independent of 3D projection).
-                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                h, w = gray.shape[:2]
-                floor_band = np.zeros((h, w), dtype=bool)
-                floor_band[int(h * 0.4) :, :] = True
-
-                # Rug mask via texture
-                tex = np.abs(cv2.Laplacian(gray, cv2.CV_32F))
-                tex_vals = tex[floor_band]
-                if tex_vals.size:
-                    thresh = np.quantile(tex_vals, args.screen_rug_quantile)
-                    rug_mask = (tex >= thresh) & floor_band
-                    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
-                    rug_mask = cv2.morphologyEx(rug_mask.astype(np.uint8), cv2.MORPH_CLOSE, kernel)
-                    rug_mask = rug_mask.astype(bool)
-                    if rug_mask.mean() > 0.002:
-                        overlay[rug_mask] = (
-                            overlay[rug_mask].astype(np.float32) * 0.6
-                            + np.array(component_colors["slip"], dtype=np.float32) * 0.4
-                        ).astype(np.uint8)
-
-                # Table mask via edge-contour bounding boxes
-                edges = cv2.Canny(gray, 50, 150)
-                edges[: int(h * 0.35), :] = 0
-                contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                best_box = None
-                best_area = 0
-                for cnt in contours:
-                    x, y, bw, bh = cv2.boundingRect(cnt)
-                    area = bw * bh
-                    area_ratio = area / float(w * h)
-                    if area_ratio < args.screen_table_min_area or area_ratio > args.screen_table_max_area:
-                        continue
-                    if y < int(h * 0.35):
-                        continue
-                    ar = bw / float(bh + 1e-6)
-                    if ar < 0.4 or ar > 2.8:
-                        continue
-                    if area > best_area:
-                        best_area = area
-                        best_box = (x, y, bw, bh)
-                if best_box:
-                    x, y, bw, bh = best_box
-                    table_mask = np.zeros((h, w), dtype=np.uint8)
-                    cv2.rectangle(table_mask, (x, y), (x + bw, y + bh), 255, thickness=-1)
-                    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (21, 21))
-                    table_mask = cv2.dilate(table_mask, kernel, iterations=1).astype(bool)
-                    overlay[table_mask] = (
-                        overlay[table_mask].astype(np.float32) * 0.6
-                        + np.array(component_colors["trip"], dtype=np.float32) * 0.4
+                            r = max(14, int(12 + value * 26))
+                            cv2.circle(mask, (u, v), r, 255, thickness=-1)
+                    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (55, 55))
+                    mask = cv2.dilate(mask, kernel, iterations=1)
+                    fill_color = np.array(base_color, dtype=np.float32)
+                    alpha = 0.45 if is_trip or name == "hotspot" else 0.55
+                    overlay[mask > 0] = (
+                        overlay[mask > 0].astype(np.float32) * (1.0 - alpha)
+                        + fill_color * alpha
                     ).astype(np.uint8)
-                frame = overlay
+            frame = cv2.addWeighted(overlay, args.alpha, frame, 1.0 - args.alpha, 0)
             if args.legend and component_layers:
                 legend_items = [
                     ("Obstacle", component_colors["obstacle"]),
