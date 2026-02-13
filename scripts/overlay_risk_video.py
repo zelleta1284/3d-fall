@@ -231,7 +231,7 @@ def main() -> None:
     parser.add_argument("--depth-occlusion-tol-m", type=float, default=0.15, help="Depth occlusion tolerance (meters)")
     parser.add_argument("--depth-occlusion-tol-ratio", type=float, default=0.2, help="Depth occlusion tolerance ratio")
     parser.add_argument("--depth-min-keep", type=float, default=0.1, help="Minimum fraction of points to keep after depth occlusion")
-    parser.add_argument("--min-v-ratio", type=float, default=0.2, help="Only draw overlay below this vertical ratio")
+    parser.add_argument("--min-v-ratio", type=float, default=0.0, help="Only draw overlay below this vertical ratio")
     parser.add_argument("--shaded-only", dest="shaded_only", action="store_true", help="Render shaded regions only (no dots)")
     parser.add_argument("--no-shaded-only", dest="shaded_only", action="store_false", help="Render dots/points")
     parser.set_defaults(shaded_only=True)
@@ -244,7 +244,8 @@ def main() -> None:
     parser.add_argument("--contrast", type=float, default=1.04, help="Cinematic contrast")
     parser.add_argument("--saturation", type=float, default=1.06, help="Cinematic saturation")
     parser.add_argument("--floor-mask-min-coverage", type=float, default=0.005, help="Minimum fraction of pixels for floor mask to be used")
-    parser.add_argument("--floor-mask-min-keep", type=float, default=0.08, help="Minimum retained fraction after floor masking")
+    parser.add_argument("--floor-mask-min-keep", type=float, default=0.05, help="Minimum retained fraction after floor masking")
+    parser.add_argument("--overlay-min-coverage", type=float, default=0.002, help="Minimum fraction of pixels for shaded overlay; otherwise relax masking")
     parser.add_argument("--include-all-trip-slip", dest="include_all_trip_slip", action="store_true", help="Render all nonzero trip/slip cells")
     parser.add_argument("--no-include-all-trip-slip", dest="include_all_trip_slip", action="store_false", help="Allow quantile sampling for trip/slip")
     parser.add_argument("--no-minimap", dest="show_minimap", action="store_false", help="Disable mini-map inset")
@@ -681,15 +682,19 @@ def main() -> None:
                             cv2.rectangle(mask, (x0, y0), (x1, y1), 255, thickness=-1)
                     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (61, 61))
                     mask = cv2.dilate(mask, kernel, iterations=1)
+                    raw_mask = mask.copy()
                     if floor_mask is not None:
                         raw_count = float(np.count_nonzero(mask))
                         masked = cv2.bitwise_and(mask, floor_mask)
                         masked_count = float(np.count_nonzero(masked))
                         if raw_count > 0 and masked_count / raw_count >= args.floor_mask_min_keep:
                             mask = masked
+                    # If masking wiped out too much, fall back to unmasked overlay.
+                    if np.count_nonzero(mask) / float(height * width) < args.overlay_min_coverage:
+                        mask = raw_mask
                     mask = cv2.GaussianBlur(mask, (0, 0), 3)
                     fill_color = np.array(base_color, dtype=np.float32)
-                    alpha = 0.55 if is_trip else 0.6
+                    alpha = 0.68 if is_trip else 0.72
                     if name == "hotspot":
                         t = frame_idx / max(video_fps, 1.0)
                         pulse = 0.6 + 0.4 * np.sin(2.0 * np.pi * args.pulse_speed * t)
