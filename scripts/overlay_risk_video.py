@@ -145,6 +145,70 @@ def _color_map(values: np.ndarray) -> np.ndarray:
     return colors
 
 
+def _apply_cinematic_grade(frame: np.ndarray, vignette: np.ndarray, contrast: float, saturation: float) -> np.ndarray:
+    graded = frame.astype(np.float32) / 255.0
+    graded = np.clip((graded - 0.5) * contrast + 0.5, 0.0, 1.0)
+    hsv = cv2.cvtColor((graded * 255).astype(np.uint8), cv2.COLOR_BGR2HSV).astype(np.float32)
+    hsv[:, :, 1] = np.clip(hsv[:, :, 1] * saturation, 0, 255)
+    graded = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2BGR).astype(np.float32) / 255.0
+    graded = np.clip(graded * vignette, 0.0, 1.0)
+    return (graded * 255).astype(np.uint8)
+
+
+def _build_vignette(width: int, height: int, strength: float) -> np.ndarray:
+    if strength <= 0:
+        return np.ones((height, width, 1), dtype=np.float32)
+    x = np.linspace(-1.0, 1.0, width)
+    y = np.linspace(-1.0, 1.0, height)
+    xx, yy = np.meshgrid(x, y)
+    radius = np.sqrt(xx ** 2 + yy ** 2)
+    vignette = 1.0 - strength * np.clip(radius, 0.0, 1.0)
+    return vignette[..., None].astype(np.float32)
+
+
+def _render_minimap(
+    trip: Optional[np.ndarray],
+    slip: Optional[np.ndarray],
+    heat: Optional[np.ndarray],
+    size: int,
+    colors: Dict[str, Tuple[int, int, int]],
+) -> np.ndarray:
+    if trip is None and slip is None and heat is None:
+        return np.zeros((size, size, 3), dtype=np.uint8)
+    base = np.zeros_like(trip if trip is not None else slip if slip is not None else heat, dtype=np.float32)
+    if trip is not None:
+        t = trip.astype(np.float32)
+        if t.max() > 0:
+            base = np.maximum(base, t / t.max())
+    if slip is not None:
+        s = slip.astype(np.float32)
+        if s.max() > 0:
+            base = np.maximum(base, s / s.max())
+    if heat is not None:
+        h = heat.astype(np.float32)
+        if h.max() > 0:
+            base = np.maximum(base, h / h.max())
+    base = np.clip(base, 0.0, 1.0)
+    map_img = np.zeros(base.shape + (3,), dtype=np.float32)
+    if trip is not None:
+        t = trip.astype(np.float32)
+        if t.max() > 0:
+            map_img += (t / t.max())[..., None] * (np.array(colors["trip"], dtype=np.float32) / 255.0)
+    if slip is not None:
+        s = slip.astype(np.float32)
+        if s.max() > 0:
+            map_img += (s / s.max())[..., None] * (np.array(colors["slip"], dtype=np.float32) / 255.0)
+    if heat is not None:
+        h = heat.astype(np.float32)
+        if h.max() > 0:
+            heat_colors = plt.get_cmap("inferno")(np.clip(h / h.max(), 0, 1))[:, :, :3]
+            map_img = np.maximum(map_img, heat_colors.astype(np.float32))
+    map_img = np.clip(map_img, 0.0, 1.0)
+    map_img = (map_img * 255).astype(np.uint8)
+    map_img = cv2.resize(map_img, (size, size), interpolation=cv2.INTER_NEAREST)
+    return map_img
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Overlay the risk heatmap on the original video.")
     parser.add_argument("--video", required=True)
@@ -170,6 +234,18 @@ def main() -> None:
     parser.add_argument("--shaded-only", dest="shaded_only", action="store_true", help="Render shaded regions only (no dots)")
     parser.add_argument("--no-shaded-only", dest="shaded_only", action="store_false", help="Render dots/points")
     parser.set_defaults(shaded_only=True)
+    parser.add_argument("--fade-seconds", type=float, default=1.0, help="Overlay fade-in duration (seconds)")
+    parser.add_argument("--split-seconds", type=float, default=2.0, help="Split-screen intro duration (seconds)")
+    parser.add_argument("--minimap-size", type=int, default=180, help="Mini-map inset size (pixels)")
+    parser.add_argument("--minimap-alpha", type=float, default=0.85, help="Mini-map alpha")
+    parser.add_argument("--pulse-speed", type=float, default=1.2, help="Hotspot pulse speed (Hz)")
+    parser.add_argument("--vignette-strength", type=float, default=0.25, help="Cinematic vignette strength")
+    parser.add_argument("--contrast", type=float, default=1.04, help="Cinematic contrast")
+    parser.add_argument("--saturation", type=float, default=1.06, help="Cinematic saturation")
+    parser.add_argument("--no-minimap", dest="show_minimap", action="store_false", help="Disable mini-map inset")
+    parser.add_argument("--no-split", dest="show_split", action="store_false", help="Disable split-screen intro")
+    parser.add_argument("--no-grade", dest="show_grade", action="store_false", help="Disable cinematic grade/vignette")
+    parser.set_defaults(show_minimap=True, show_split=True, show_grade=True)
     args = parser.parse_args()
 
     workdir = Path(args.workdir)
@@ -229,6 +305,8 @@ def main() -> None:
     xx, yy = np.meshgrid(xs, ys)
     floor_pts = np.column_stack([xx.ravel(), yy.ravel(), np.full(xx.size, floor_z, dtype=np.float32)])
     floor_pts = _unscale(floor_pts)
+    floor_stride = max(1, int(floor_pts.shape[0] / 6000))
+    floor_mask_pts = floor_pts[::floor_stride]
 
     components_path = risk_dir / "risk_components.npz"
     component_colors: Dict[str, Tuple[int, int, int]] = {
@@ -239,9 +317,16 @@ def main() -> None:
         "physics": (255, 0, 255),  # magenta
     }
     component_layers: List[Dict[str, np.ndarray]] = []
+    mini_trip = None
+    mini_slip = None
+    mini_heat = None
 
     if args.show_components and components_path.exists():
         comp_data = np.load(components_path)
+        if "trip" in comp_data:
+            mini_trip = comp_data["trip"].astype(np.float32)
+        if "slip" in comp_data:
+            mini_slip = comp_data["slip"].astype(np.float32)
         per_layer = max(50, args.max_points // max(len(component_colors), 1))
         slip_layers: List[Dict[str, np.ndarray]] = []
         for name, color in component_colors.items():
@@ -309,6 +394,7 @@ def main() -> None:
         if heat_max <= 0:
             raise RuntimeError("Heatmap all zeros; nothing to overlay.")
         norm_heat = heat_flat / heat_max
+        mini_heat = heatmap.astype(np.float32)
         heat_thresh = np.quantile(norm_heat, args.heat_quantile) if np.any(norm_heat > 0) else 1.0
         idx_heat = np.where(norm_heat >= heat_thresh)[0]
         if idx_heat.size > args.max_points:
@@ -422,6 +508,10 @@ def main() -> None:
             component_colors["turn"],
         )
 
+    if mini_trip is None:
+        mini_trip = heatmap.astype(np.float32)
+    minimap = _render_minimap(mini_trip, mini_slip, mini_heat if args.show_heat else None, args.minimap_size, component_colors)
+
     cameras = _parse_cameras_txt(colmap_txt / "cameras.txt")
     images = _parse_images_txt(colmap_txt / "images.txt")
     available_frames = sorted(images.keys())
@@ -442,6 +532,10 @@ def main() -> None:
     if not writer.isOpened():
         raise RuntimeError("Failed to open VideoWriter for overlay.")
 
+    vignette = _build_vignette(width, height, args.vignette_strength)
+    split_frames = int(round(max(args.split_seconds, 0.0) * video_fps))
+    fade_frames = int(round(max(args.fade_seconds, 0.0) * video_fps))
+
     last_camera: Optional[Dict[str, np.ndarray]] = None
     last_pose_name: Optional[str] = None
     last_depth: Optional[np.ndarray] = None
@@ -450,6 +544,9 @@ def main() -> None:
         ret, frame = cap.read()
         if not ret:
             break
+        raw_frame = frame.copy()
+        if args.show_grade:
+            frame = _apply_cinematic_grade(frame, vignette, args.contrast, args.saturation)
         pose_idx = min(frame_idx // frame_interval, len(available_frames) - 1)
         pose_name = available_frames[pose_idx]
         camera = images.get(pose_name)
@@ -459,6 +556,21 @@ def main() -> None:
             last_camera = camera
         overlay = frame.copy()
         if camera:
+            floor_mask = None
+            proj_floor, valid_floor, _ = _project_points(floor_mask_pts, camera, cameras)
+            if proj_floor.size:
+                proj_floor = proj_floor[np.isfinite(proj_floor).all(axis=1)]
+                if args.min_v_ratio > 0:
+                    v_min = int(height * args.min_v_ratio)
+                    proj_floor = proj_floor[proj_floor[:, 1] >= v_min]
+                mask = np.zeros((height, width), dtype=np.uint8)
+                for (u, v) in proj_floor.astype(np.int32):
+                    if 0 <= u < width and 0 <= v < height:
+                        cv2.rectangle(mask, (u - 6, v - 6), (u + 6, v + 6), 255, thickness=-1)
+                kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (41, 41))
+                mask = cv2.dilate(mask, kernel, iterations=1)
+                floor_mask = mask
+
             depth_m = None
             if args.depth_occlusion and depth_dir.exists():
                 if pose_name != last_pose_name:
@@ -546,20 +658,27 @@ def main() -> None:
                             cv2.rectangle(mask, (x0, y0), (x1, y1), 255, thickness=-1)
                     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (35, 35))
                     mask = cv2.dilate(mask, kernel, iterations=1)
+                    if floor_mask is not None:
+                        mask = cv2.bitwise_and(mask, floor_mask)
                     fill_color = np.array(base_color, dtype=np.float32)
-                    alpha = 0.45 if is_trip or name == "hotspot" else 0.55
+                    alpha = 0.42 if is_trip else 0.52
+                    if name == "hotspot":
+                        t = frame_idx / max(video_fps, 1.0)
+                        pulse = 0.6 + 0.4 * np.sin(2.0 * np.pi * args.pulse_speed * t)
+                        alpha *= float(np.clip(pulse, 0.3, 1.0))
                     overlay[mask > 0] = (
                         overlay[mask > 0].astype(np.float32) * (1.0 - alpha)
                         + fill_color * alpha
                     ).astype(np.uint8)
-            frame = cv2.addWeighted(overlay, args.alpha, frame, 1.0 - args.alpha, 0)
+            fade = 1.0
+            if fade_frames > 0:
+                fade = min(1.0, frame_idx / float(fade_frames))
+            frame = cv2.addWeighted(overlay, args.alpha * fade, frame, 1.0 - args.alpha * fade, 0)
             if args.legend and component_layers:
                 legend_items = [
-                    ("Obstacle", component_colors["obstacle"]),
                     ("Trip", component_colors["trip"]),
                     ("Slip", component_colors["slip"]),
-                    ("Turn", component_colors["turn"]),
-                    ("Physics", component_colors["physics"]),
+                    ("Hotspot", (0, 0, 255)),
                 ]
                 x0, y0 = 12, 18
                 line_h = 18
@@ -576,6 +695,23 @@ def main() -> None:
                         1,
                         cv2.LINE_AA,
                     )
+            if args.show_minimap and minimap is not None:
+                inset = minimap.copy()
+                inset_h, inset_w = inset.shape[:2]
+                pad = 10
+                x1 = width - inset_w - pad
+                y1 = pad
+                if x1 >= 0 and y1 + inset_h <= height:
+                    roi = frame[y1:y1 + inset_h, x1:x1 + inset_w]
+                    blended = cv2.addWeighted(inset, args.minimap_alpha, roi, 1.0 - args.minimap_alpha, 0)
+                    frame[y1:y1 + inset_h, x1:x1 + inset_w] = blended
+                    cv2.rectangle(frame, (x1 - 2, y1 - 2), (x1 + inset_w + 2, y1 + inset_h + 2), (255, 255, 255), 1)
+        if args.show_split and frame_idx < split_frames:
+            split_x = width // 2
+            combined = raw_frame.copy()
+            combined[:, split_x:] = frame[:, split_x:]
+            cv2.line(combined, (split_x, 0), (split_x, height), (255, 255, 255), 2)
+            frame = combined
         writer.write(frame)
         frame_idx += 1
 
