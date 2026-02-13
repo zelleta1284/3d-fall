@@ -255,7 +255,7 @@ def main() -> None:
     parser.add_argument("--full-floor-heat-top", type=float, default=0.35, help="Top ratio for full-floor heat band")
     parser.add_argument("--path-only", dest="path_only", action="store_true", help="Restrict overlays to walking path corridor")
     parser.add_argument("--no-path-only", dest="path_only", action="store_false", help="Do not restrict overlays to walking path corridor")
-    parser.add_argument("--path-width", type=int, default=60, help="Half-width (px) of walking path corridor")
+    parser.add_argument("--path-width", type=int, default=30, help="Half-width (px) of walking path corridor")
     parser.add_argument("--include-all-trip-slip", dest="include_all_trip_slip", action="store_true", help="Render all nonzero trip/slip cells")
     parser.add_argument("--no-include-all-trip-slip", dest="include_all_trip_slip", action="store_false", help="Allow quantile sampling for trip/slip")
     parser.add_argument("--no-minimap", dest="show_minimap", action="store_false", help="Disable mini-map inset")
@@ -646,9 +646,9 @@ def main() -> None:
                                 255,
                                 thickness=-1,
                             )
-                    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (31, 31))
+                    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 15))
                     mask = cv2.dilate(mask, kernel, iterations=1)
-                    if np.count_nonzero(mask) / float(height * width) >= 0.003:
+                    if np.count_nonzero(mask) / float(height * width) >= 0.0005:
                         path_mask = mask
 
             depth_m = None
@@ -764,7 +764,16 @@ def main() -> None:
                     mid_mask = cv2.dilate(mid_mask, kernel, iterations=1)
                     high_mask = cv2.dilate(high_mask, kernel, iterations=1)
                     raw_mask = cv2.bitwise_or(cv2.bitwise_or(low_mask, mid_mask), high_mask)
-                    if floor_mask is not None and not is_semantic:
+                    if path_mask is not None:
+                        raw_count = float(np.count_nonzero(raw_mask))
+                        masked = cv2.bitwise_and(raw_mask, path_mask)
+                        masked_count = float(np.count_nonzero(masked))
+                        if raw_count > 0 and masked_count / raw_count >= 0.01:
+                            raw_mask = masked
+                            low_mask = cv2.bitwise_and(low_mask, masked)
+                            mid_mask = cv2.bitwise_and(mid_mask, masked)
+                            high_mask = cv2.bitwise_and(high_mask, masked)
+                    elif floor_mask is not None and not is_semantic:
                         raw_count = float(np.count_nonzero(raw_mask))
                         low_mask = cv2.bitwise_and(low_mask, floor_mask)
                         mid_mask = cv2.bitwise_and(mid_mask, floor_mask)
@@ -772,15 +781,6 @@ def main() -> None:
                         masked = cv2.bitwise_or(cv2.bitwise_or(low_mask, mid_mask), high_mask)
                         masked_count = float(np.count_nonzero(masked))
                         if raw_count > 0 and masked_count / raw_count >= args.floor_mask_min_keep:
-                            raw_mask = masked
-                            low_mask = cv2.bitwise_and(low_mask, masked)
-                            mid_mask = cv2.bitwise_and(mid_mask, masked)
-                            high_mask = cv2.bitwise_and(high_mask, masked)
-                    if path_mask is not None:
-                        raw_count = float(np.count_nonzero(raw_mask))
-                        masked = cv2.bitwise_and(raw_mask, path_mask)
-                        masked_count = float(np.count_nonzero(masked))
-                        if raw_count > 0 and masked_count / raw_count >= 0.05:
                             raw_mask = masked
                             low_mask = cv2.bitwise_and(low_mask, masked)
                             mid_mask = cv2.bitwise_and(mid_mask, masked)
@@ -812,11 +812,11 @@ def main() -> None:
                         risk_any_mask = raw_mask.copy()
                     else:
                         risk_any_mask = cv2.bitwise_or(risk_any_mask, raw_mask)
-            if floor_mask is not None and risk_any_mask is not None:
+            if not args.path_only and floor_mask is not None and risk_any_mask is not None:
                 # If the overlay coverage is still tiny, softly shade the full floor to ensure visibility.
                 coverage = float(np.count_nonzero(risk_any_mask)) / float(height * width)
                 if coverage < 0.12:
-                    fallback_mask = path_mask if path_mask is not None else floor_mask
+                    fallback_mask = floor_mask
                     overlay[fallback_mask > 0] = (
                         overlay[fallback_mask > 0].astype(np.float32) * (1.0 - args.floor_fallback_alpha)
                         + np.array(component_colors["trip"], dtype=np.float32) * args.floor_fallback_alpha
