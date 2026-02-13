@@ -242,7 +242,8 @@ def main() -> None:
     parser.add_argument("--vignette-strength", type=float, default=0.25, help="Cinematic vignette strength")
     parser.add_argument("--contrast", type=float, default=1.04, help="Cinematic contrast")
     parser.add_argument("--saturation", type=float, default=1.06, help="Cinematic saturation")
-    parser.add_argument("--floor-mask-min-coverage", type=float, default=0.003, help="Minimum fraction of pixels for floor mask to be used")
+    parser.add_argument("--floor-mask-min-coverage", type=float, default=0.005, help="Minimum fraction of pixels for floor mask to be used")
+    parser.add_argument("--floor-mask-min-keep", type=float, default=0.08, help="Minimum retained fraction after floor masking")
     parser.add_argument("--include-all-trip-slip", dest="include_all_trip_slip", action="store_true", help="Render all nonzero trip/slip cells")
     parser.add_argument("--no-include-all-trip-slip", dest="include_all_trip_slip", action="store_false", help="Allow quantile sampling for trip/slip")
     parser.add_argument("--no-minimap", dest="show_minimap", action="store_false", help="Disable mini-map inset")
@@ -667,21 +668,25 @@ def main() -> None:
                     mask = np.zeros((height, width), dtype=np.uint8)
                     for (u, v), value in zip(pts, values):
                         if 0 <= u < width and 0 <= v < height:
-                            r = max(14, int(14 + value * 26))
+                            r = max(18, int(20 + value * 32))
                             x0, y0 = max(0, u - r), max(0, v - r)
                             x1, y1 = min(width - 1, u + r), min(height - 1, v + r)
                             cv2.rectangle(mask, (x0, y0), (x1, y1), 255, thickness=-1)
-                    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (45, 45))
+                    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (61, 61))
                     mask = cv2.dilate(mask, kernel, iterations=1)
                     if floor_mask is not None:
-                        mask = cv2.bitwise_and(mask, floor_mask)
+                        raw_count = float(np.count_nonzero(mask))
+                        masked = cv2.bitwise_and(mask, floor_mask)
+                        masked_count = float(np.count_nonzero(masked))
+                        if raw_count > 0 and masked_count / raw_count >= args.floor_mask_min_keep:
+                            mask = masked
                     mask = cv2.GaussianBlur(mask, (0, 0), 3)
                     fill_color = np.array(base_color, dtype=np.float32)
-                    alpha = 0.42 if is_trip else 0.52
+                    alpha = 0.55 if is_trip else 0.6
                     if name == "hotspot":
                         t = frame_idx / max(video_fps, 1.0)
                         pulse = 0.6 + 0.4 * np.sin(2.0 * np.pi * args.pulse_speed * t)
-                        alpha *= float(np.clip(pulse, 0.3, 1.0))
+                        alpha *= float(np.clip(pulse, 0.5, 1.0))
                     overlay[mask > 0] = (
                         overlay[mask > 0].astype(np.float32) * (1.0 - alpha)
                         + fill_color * alpha
