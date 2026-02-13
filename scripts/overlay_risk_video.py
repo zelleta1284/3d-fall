@@ -540,9 +540,11 @@ def main() -> None:
                     mask = np.zeros((height, width), dtype=np.uint8)
                     for (u, v), value in zip(pts, values):
                         if 0 <= u < width and 0 <= v < height:
-                            r = max(14, int(12 + value * 26))
-                            cv2.circle(mask, (u, v), r, 255, thickness=-1)
-                    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (55, 55))
+                            r = max(10, int(8 + value * 18))
+                            x0, y0 = max(0, u - r), max(0, v - r)
+                            x1, y1 = min(width - 1, u + r), min(height - 1, v + r)
+                            cv2.rectangle(mask, (x0, y0), (x1, y1), 255, thickness=-1)
+                    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (35, 35))
                     mask = cv2.dilate(mask, kernel, iterations=1)
                     fill_color = np.array(base_color, dtype=np.float32)
                     alpha = 0.45 if is_trip or name == "hotspot" else 0.55
