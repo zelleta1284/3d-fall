@@ -8,6 +8,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import open3d as o3d
 import yaml
+import torch
+import torchvision
+import torchvision.transforms.functional as TF
 
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -209,6 +212,75 @@ def _render_minimap(
     return map_img
 
 
+_COCO_CLASSES = [
+    "__background__",
+    "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train",
+    "truck", "boat", "traffic light", "fire hydrant", "stop sign", "parking meter",
+    "bench", "bird", "cat", "dog", "horse", "sheep", "cow", "elephant", "bear",
+    "zebra", "giraffe", "backpack", "umbrella", "handbag", "tie", "suitcase",
+    "frisbee", "skis", "snowboard", "sports ball", "kite", "baseball bat",
+    "baseball glove", "skateboard", "surfboard", "tennis racket", "bottle",
+    "wine glass", "cup", "fork", "knife", "spoon", "bowl", "banana", "apple",
+    "sandwich", "orange", "broccoli", "carrot", "hot dog", "pizza", "donut",
+    "cake", "chair", "couch", "potted plant", "bed", "dining table", "toilet",
+    "tv", "laptop", "mouse", "remote", "keyboard", "cell phone", "microwave",
+    "oven", "toaster", "sink", "refrigerator", "book", "clock", "vase",
+    "scissors", "teddy bear", "hair drier", "toothbrush",
+]
+
+
+def _load_detector() -> torch.nn.Module:
+    model = torchvision.models.detection.fasterrcnn_resnet50_fpn(weights="DEFAULT")
+    model.eval()
+    return model
+
+
+def _detect_objects(
+    model: torch.nn.Module,
+    frame_bgr: np.ndarray,
+    score_thresh: float,
+    max_dets: int,
+    class_filter: Optional[set],
+) -> List[Dict[str, object]]:
+    rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+    tensor = TF.to_tensor(rgb)
+    with torch.no_grad():
+        outputs = model([tensor])[0]
+    boxes = outputs["boxes"].cpu().numpy()
+    labels = outputs["labels"].cpu().numpy()
+    scores = outputs["scores"].cpu().numpy()
+    dets: List[Dict[str, object]] = []
+    for box, label, score in zip(boxes, labels, scores):
+        if score < score_thresh:
+            continue
+        name = _COCO_CLASSES[int(label)] if int(label) < len(_COCO_CLASSES) else str(label)
+        if class_filter is not None and name not in class_filter:
+            continue
+        dets.append({"box": box.astype(int), "label": name, "score": float(score)})
+        if len(dets) >= max_dets:
+            break
+    return dets
+
+
+def _rug_heuristic(frame_bgr: np.ndarray) -> Optional[Tuple[int, int, int, int]]:
+    h, w = frame_bgr.shape[:2]
+    y0 = int(h * 0.45)
+    roi = frame_bgr[y0:h, :]
+    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+    edges = cv2.Canny(gray, 80, 160)
+    k = cv2.getStructuringElement(cv2.MORPH_RECT, (9, 9))
+    edges = cv2.dilate(edges, k, iterations=1)
+    ys, xs = np.where(edges > 0)
+    if ys.size < 300:
+        return None
+    x_min, x_max = xs.min(), xs.max()
+    y_min, y_max = ys.min(), ys.max()
+    # require a reasonably large region
+    if (x_max - x_min) * (y_max - y_min) < 0.03 * (w * (h - y0)):
+        return None
+    return (x_min, y_min + y0, x_max, y_max + y0)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Overlay the risk heatmap on the original video.")
     parser.add_argument("--video", required=True)
@@ -256,6 +328,17 @@ def main() -> None:
     parser.add_argument("--path-only", dest="path_only", action="store_true", help="Restrict overlays to walking path corridor")
     parser.add_argument("--no-path-only", dest="path_only", action="store_false", help="Do not restrict overlays to walking path corridor")
     parser.add_argument("--path-width", type=int, default=30, help="Half-width (px) of walking path corridor")
+    parser.add_argument("--detect-objects", action="store_true", help="Draw object detection boxes")
+    parser.add_argument("--detect-every", type=int, default=5, help="Run object detection every N frames")
+    parser.add_argument("--detect-score", type=float, default=0.5, help="Detection confidence threshold")
+    parser.add_argument("--detect-max", type=int, default=20, help="Maximum detections per frame")
+    parser.add_argument(
+        "--detect-classes",
+        type=str,
+        default="chair,couch,dining table,bed,TV,book,vase,table,desk,sofa,toilet,sink,oven,stove,refrigerator",
+        help="Comma-separated class filter (COCO names). Empty = all",
+    )
+    parser.add_argument("--detect-rug", action="store_true", help="Add a rug heuristic box")
     parser.add_argument("--include-all-trip-slip", dest="include_all_trip_slip", action="store_true", help="Render all nonzero trip/slip cells")
     parser.add_argument("--no-include-all-trip-slip", dest="include_all_trip_slip", action="store_false", help="Allow quantile sampling for trip/slip")
     parser.add_argument("--no-minimap", dest="show_minimap", action="store_false", help="Disable mini-map inset")
@@ -268,7 +351,7 @@ def main() -> None:
         include_all_trip_slip=True,
         skip_occlusion_for_risk=True,
         full_floor_heat=False,
-        path_only=True,
+        path_only=False,
     )
     args = parser.parse_args()
 
@@ -593,6 +676,13 @@ def main() -> None:
     last_camera: Optional[Dict[str, np.ndarray]] = None
     last_pose_name: Optional[str] = None
     last_depth: Optional[np.ndarray] = None
+    detector = None
+    last_dets: List[Dict[str, object]] = []
+    class_filter: Optional[set] = None
+    if args.detect_objects:
+        detector = _load_detector()
+        detect_classes = [c.strip().lower() for c in args.detect_classes.split(",") if c.strip()]
+        class_filter = set(detect_classes) if detect_classes else None
     frame_idx = 0
     while True:
         ret, frame = cap.read()
@@ -728,6 +818,7 @@ def main() -> None:
                 is_semantic = name.startswith("semantic_")
                 is_slip = "slip" in name
                 is_trip = "trip" in name
+                is_obstacle = "obstacle" in name
                 if layer.get("mode") == "heat":
                     if not args.show_heat:
                         continue
@@ -738,7 +829,7 @@ def main() -> None:
                             cv2.circle(overlay, (u, v), radius, tuple(int(c) for c in color), thickness=-1)
                 else:
                     # Only shade trip/slip/hotspot layers; skip glare/other components.
-                    if not (is_trip or is_slip or name == "hotspot" or name.startswith("semantic_")):
+                    if not (is_trip or is_slip or is_obstacle or name == "hotspot" or name.startswith("semantic_")):
                         continue
                     base_color = layer.get("color", np.array((0, 0, 255), dtype=np.int32))
                     override = semantic_color_overrides.get(name)
@@ -869,6 +960,28 @@ def main() -> None:
                     else:
                         blended = cv2.addWeighted(heat_band, args.full_floor_heat_alpha, heat_roi, 1.0 - args.full_floor_heat_alpha, 0)
                         frame[y_start:height, 0:width] = blended
+            if args.detect_objects and detector is not None:
+                if frame_idx % max(args.detect_every, 1) == 0:
+                    last_dets = _detect_objects(
+                        detector,
+                        raw_frame,
+                        score_thresh=args.detect_score,
+                        max_dets=args.detect_max,
+                        class_filter=class_filter,
+                    )
+                    if args.detect_rug:
+                        rug_box = _rug_heuristic(raw_frame)
+                        if rug_box:
+                            last_dets.append({"box": rug_box, "label": "rug (heuristic)", "score": 1.0})
+                for det in last_dets:
+                    box = det["box"]
+                    label = str(det["label"])
+                    score = det["score"]
+                    x1, y1, x2, y2 = [int(v) for v in box]
+                    color = (0, 255, 255) if "rug" in label else (0, 0, 255)
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), color, thickness=2)
+                    text = f"{label} {score:.2f}" if score < 0.99 else label
+                    cv2.putText(frame, text, (x1, max(0, y1 - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
         if args.show_split and frame_idx < split_frames:
             split_x = width // 2
             combined = raw_frame.copy()
