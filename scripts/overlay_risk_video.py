@@ -226,7 +226,6 @@ def main() -> None:
         "trip": (0, 128, 255),     # orange
         "slip": (255, 0, 0),       # blue
         "turn": (0, 255, 0),       # green
-        "glare": (0, 255, 255),    # yellow
         "physics": (255, 0, 255),  # magenta
     }
     component_layers: List[Dict[str, np.ndarray]] = []
@@ -415,7 +414,6 @@ def main() -> None:
                     ("Trip", component_colors["trip"]),
                     ("Slip", component_colors["slip"]),
                     ("Turn", component_colors["turn"]),
-                    ("Glare", component_colors["glare"]),
                     ("Physics", component_colors["physics"]),
                 ]
                 x0, y0 = 12, 18
