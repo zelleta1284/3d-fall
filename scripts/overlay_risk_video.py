@@ -336,6 +336,11 @@ def main() -> None:
         "turn": (0, 255, 0),        # green
         "physics": (255, 0, 255),   # magenta
     }
+    semantic_color_overrides: Dict[str, Tuple[int, int, int]] = {
+        "semantic_trip": (0, 215, 255),      # rugs: yellow
+        "semantic_slip": (255, 180, 80),     # slip: light blue
+        "semantic_obstacle": (0, 0, 200),    # tables: deep red
+    }
     component_layers: List[Dict[str, np.ndarray]] = []
     mini_trip = None
     mini_slip = None
@@ -710,41 +715,68 @@ def main() -> None:
                     if not (is_trip or is_slip or name == "hotspot" or name.startswith("semantic_")):
                         continue
                     base_color = layer.get("color", np.array((0, 0, 255), dtype=np.int32))
-                    mask = np.zeros((height, width), dtype=np.uint8)
+                    override = semantic_color_overrides.get(name)
+                    if override is not None:
+                        base_color = np.array(override, dtype=np.int32)
+                    # Hard color bands: draw separate masks by value buckets.
+                    low_mask = np.zeros((height, width), dtype=np.uint8)
+                    mid_mask = np.zeros((height, width), dtype=np.uint8)
+                    high_mask = np.zeros((height, width), dtype=np.uint8)
                     for (u, v), value in zip(pts, values):
                         if 0 <= u < width and 0 <= v < height:
                             r = max(18, int(20 + value * 32))
                             x0, y0 = max(0, u - r), max(0, v - r)
                             x1, y1 = min(width - 1, u + r), min(height - 1, v + r)
-                            cv2.rectangle(mask, (x0, y0), (x1, y1), 255, thickness=-1)
+                            if value >= 0.66:
+                                cv2.rectangle(high_mask, (x0, y0), (x1, y1), 255, thickness=-1)
+                            elif value >= 0.33:
+                                cv2.rectangle(mid_mask, (x0, y0), (x1, y1), 255, thickness=-1)
+                            else:
+                                cv2.rectangle(low_mask, (x0, y0), (x1, y1), 255, thickness=-1)
                     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (71, 71))
-                    mask = cv2.dilate(mask, kernel, iterations=1)
-                    raw_mask = mask.copy()
+                    low_mask = cv2.dilate(low_mask, kernel, iterations=1)
+                    mid_mask = cv2.dilate(mid_mask, kernel, iterations=1)
+                    high_mask = cv2.dilate(high_mask, kernel, iterations=1)
+                    raw_mask = cv2.bitwise_or(cv2.bitwise_or(low_mask, mid_mask), high_mask)
                     if floor_mask is not None:
-                        raw_count = float(np.count_nonzero(mask))
-                        masked = cv2.bitwise_and(mask, floor_mask)
+                        raw_count = float(np.count_nonzero(raw_mask))
+                        low_mask = cv2.bitwise_and(low_mask, floor_mask)
+                        mid_mask = cv2.bitwise_and(mid_mask, floor_mask)
+                        high_mask = cv2.bitwise_and(high_mask, floor_mask)
+                        masked = cv2.bitwise_or(cv2.bitwise_or(low_mask, mid_mask), high_mask)
                         masked_count = float(np.count_nonzero(masked))
                         if raw_count > 0 and masked_count / raw_count >= args.floor_mask_min_keep:
-                            mask = masked
+                            raw_mask = masked
+                            low_mask = cv2.bitwise_and(low_mask, masked)
+                            mid_mask = cv2.bitwise_and(mid_mask, masked)
+                            high_mask = cv2.bitwise_and(high_mask, masked)
                     # If masking wiped out too much, fall back to unmasked overlay.
-                    if np.count_nonzero(mask) / float(height * width) < args.overlay_min_coverage:
-                        mask = raw_mask
-                    mask = cv2.GaussianBlur(mask, (0, 0), 3)
+                    if np.count_nonzero(raw_mask) / float(height * width) < args.overlay_min_coverage:
+                        raw_mask = cv2.bitwise_or(cv2.bitwise_or(low_mask, mid_mask), high_mask)
+                    low_mask = cv2.GaussianBlur(low_mask, (0, 0), 3)
+                    mid_mask = cv2.GaussianBlur(mid_mask, (0, 0), 3)
+                    high_mask = cv2.GaussianBlur(high_mask, (0, 0), 3)
                     fill_color = np.array(base_color, dtype=np.float32)
-                    base_alpha = 0.65 if is_trip else 0.7
-                    alpha = float(np.clip(base_alpha + 0.25 * float(np.mean(values)), 0.55, 0.9))
+                    base_alpha = 0.55 if is_trip else 0.6
+                    alpha_low = base_alpha
+                    alpha_mid = base_alpha + 0.2
+                    alpha_high = base_alpha + 0.35
                     if name == "hotspot":
                         t = frame_idx / max(video_fps, 1.0)
                         pulse = 0.6 + 0.4 * np.sin(2.0 * np.pi * args.pulse_speed * t)
-                        alpha *= float(np.clip(pulse, 0.5, 1.0))
-                    overlay[mask > 0] = (
-                        overlay[mask > 0].astype(np.float32) * (1.0 - alpha)
-                        + fill_color * alpha
-                    ).astype(np.uint8)
+                        alpha_low *= float(np.clip(pulse, 0.5, 1.0))
+                        alpha_mid *= float(np.clip(pulse, 0.5, 1.0))
+                        alpha_high *= float(np.clip(pulse, 0.5, 1.0))
+                    for band_mask, alpha in ((low_mask, alpha_low), (mid_mask, alpha_mid), (high_mask, alpha_high)):
+                        if np.any(band_mask > 0):
+                            overlay[band_mask > 0] = (
+                                overlay[band_mask > 0].astype(np.float32) * (1.0 - alpha)
+                                + fill_color * alpha
+                            ).astype(np.uint8)
                     if risk_any_mask is None:
-                        risk_any_mask = mask.copy()
+                        risk_any_mask = raw_mask.copy()
                     else:
-                        risk_any_mask = cv2.bitwise_or(risk_any_mask, mask)
+                        risk_any_mask = cv2.bitwise_or(risk_any_mask, raw_mask)
             if floor_mask is not None and risk_any_mask is not None:
                 # If the overlay coverage is still tiny, softly shade the full floor to ensure visibility.
                 coverage = float(np.count_nonzero(risk_any_mask)) / float(height * width)
