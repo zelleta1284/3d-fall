@@ -223,7 +223,7 @@ def main() -> None:
     components_path = risk_dir / "risk_components.npz"
     component_colors: Dict[str, Tuple[int, int, int]] = {
         "obstacle": (0, 0, 255),   # red
-        "trip": (0, 128, 255),     # orange
+        "trip": (0, 85, 255),      # deep orange
         "slip": (255, 0, 0),       # blue
         "turn": (0, 255, 0),       # green
         "physics": (255, 0, 255),  # magenta
@@ -304,7 +304,7 @@ def main() -> None:
             "obstacle",
             obstacle_indices,
             np.full(obstacle_indices.shape[0], 1.0, dtype=np.float32),
-            (0, 0, 255),
+            component_colors["obstacle"],
         )
 
     trip_threshold = cfg.biomechanics.foot_clearance_m * (1.0 - 0.5 * cfg.biomechanics.shuffle_bias)
@@ -314,7 +314,7 @@ def main() -> None:
             "trip",
             trip_indices,
             np.clip(height_diff[trip_indices[:, 0], trip_indices[:, 1]] / (0.2 + trip_threshold), 0.0, 1.0),
-            (0, 255, 255),
+            component_colors["trip"],
         )
 
     friction_grid = build_friction_grid(cfg.room, obstacle_grid.shape, min_xy)
@@ -324,7 +324,7 @@ def main() -> None:
             "slip",
             slip_indices,
             np.clip((cfg.room.default_friction - friction_grid[slip_indices[:, 0], slip_indices[:, 1]]) / 0.5, 0.0, 1.0),
-            (0, 150, 255),
+            component_colors["slip"],
         )
 
     for path_spec in cfg.paths:
@@ -338,7 +338,7 @@ def main() -> None:
             "turn",
             path,
             np.clip(risk, 0.0, 1.0),
-            (0, 255, 0),
+            component_colors["turn"],
         )
 
     cameras = _parse_cameras_txt(colmap_txt / "cameras.txt")
