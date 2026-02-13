@@ -243,10 +243,12 @@ def main() -> None:
     parser.add_argument("--contrast", type=float, default=1.04, help="Cinematic contrast")
     parser.add_argument("--saturation", type=float, default=1.06, help="Cinematic saturation")
     parser.add_argument("--floor-mask-min-coverage", type=float, default=0.003, help="Minimum fraction of pixels for floor mask to be used")
+    parser.add_argument("--include-all-trip-slip", dest="include_all_trip_slip", action="store_true", help="Render all nonzero trip/slip cells")
+    parser.add_argument("--no-include-all-trip-slip", dest="include_all_trip_slip", action="store_false", help="Allow quantile sampling for trip/slip")
     parser.add_argument("--no-minimap", dest="show_minimap", action="store_false", help="Disable mini-map inset")
     parser.add_argument("--no-split", dest="show_split", action="store_false", help="Disable split-screen intro")
     parser.add_argument("--no-grade", dest="show_grade", action="store_false", help="Disable cinematic grade/vignette")
-    parser.set_defaults(show_minimap=True, show_split=True, show_grade=True)
+    parser.set_defaults(show_minimap=True, show_split=True, show_grade=True, include_all_trip_slip=True)
     args = parser.parse_args()
 
     workdir = Path(args.workdir)
@@ -338,10 +340,13 @@ def main() -> None:
                 continue
             limit = max(np.percentile(arr, 95), arr.max(), 1e-6)
             norm_vals = arr / limit
-            thresh = np.quantile(norm_vals, args.component_quantile) if np.any(norm_vals > 0) else 1.0
-            idx = np.where(norm_vals >= thresh)[0]
-            if idx.size > per_layer:
-                idx = np.random.choice(idx, size=per_layer, replace=False)
+            if args.include_all_trip_slip and name in {"trip", "slip"}:
+                idx = np.where(arr > 0)[0]
+            else:
+                thresh = np.quantile(norm_vals, args.component_quantile) if np.any(norm_vals > 0) else 1.0
+                idx = np.where(norm_vals >= thresh)[0]
+                if idx.size > per_layer:
+                    idx = np.random.choice(idx, size=per_layer, replace=False)
             layer = {
                 "name": name,
                 "points": floor_pts[idx],
@@ -373,9 +378,12 @@ def main() -> None:
                 continue
             limit = max(np.percentile(arr, 95), arr.max(), 1e-6)
             norm_vals = arr / limit
-            idx = np.where(arr > 0)[0]
-            if idx.size > per_layer:
-                idx = idx[np.argsort(norm_vals[idx])[::-1][:per_layer]]
+            if args.include_all_trip_slip and name in {"trip", "slip"}:
+                idx = np.where(arr > 0)[0]
+            else:
+                idx = np.where(arr > 0)[0]
+                if idx.size > per_layer:
+                    idx = idx[np.argsort(norm_vals[idx])[::-1][:per_layer]]
             layer = {
                 "name": f"semantic_{name}",
                 "points": floor_pts[idx],
@@ -659,7 +667,7 @@ def main() -> None:
                     mask = np.zeros((height, width), dtype=np.uint8)
                     for (u, v), value in zip(pts, values):
                         if 0 <= u < width and 0 <= v < height:
-                            r = max(14, int(12 + value * 24))
+                            r = max(14, int(14 + value * 26))
                             x0, y0 = max(0, u - r), max(0, v - r)
                             x1, y1 = min(width - 1, u + r), min(height - 1, v + r)
                             cv2.rectangle(mask, (x0, y0), (x1, y1), 255, thickness=-1)
