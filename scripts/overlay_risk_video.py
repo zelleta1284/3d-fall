@@ -242,6 +242,7 @@ def main() -> None:
     parser.add_argument("--vignette-strength", type=float, default=0.25, help="Cinematic vignette strength")
     parser.add_argument("--contrast", type=float, default=1.04, help="Cinematic contrast")
     parser.add_argument("--saturation", type=float, default=1.06, help="Cinematic saturation")
+    parser.add_argument("--floor-mask-min-coverage", type=float, default=0.003, help="Minimum fraction of pixels for floor mask to be used")
     parser.add_argument("--no-minimap", dest="show_minimap", action="store_false", help="Disable mini-map inset")
     parser.add_argument("--no-split", dest="show_split", action="store_false", help="Disable split-screen intro")
     parser.add_argument("--no-grade", dest="show_grade", action="store_false", help="Disable cinematic grade/vignette")
@@ -569,7 +570,8 @@ def main() -> None:
                         cv2.rectangle(mask, (u - 6, v - 6), (u + 6, v + 6), 255, thickness=-1)
                 kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (41, 41))
                 mask = cv2.dilate(mask, kernel, iterations=1)
-                floor_mask = mask
+                if np.count_nonzero(mask) / float(height * width) >= args.floor_mask_min_coverage:
+                    floor_mask = mask
 
             depth_m = None
             if args.depth_occlusion and depth_dir.exists():
@@ -596,6 +598,9 @@ def main() -> None:
                 proj = proj[finite]
                 values = values[finite]
                 depths = depths[finite]
+                proj_unoccluded = proj.copy()
+                values_unoccluded = values.copy()
+                depths_unoccluded = depths.copy()
                 # Discard points above a conservative image band (avoid wall overlays).
                 if args.min_v_ratio > 0:
                     v_min = int(height * args.min_v_ratio)
@@ -623,10 +628,12 @@ def main() -> None:
                     visible = (depth_at > 0) & (
                         depth_colmap_m <= depth_at * (1.0 + args.depth_occlusion_tol_ratio) + args.depth_occlusion_tol_m
                     )
-                    if not np.any(visible):
-                        continue
-                    proj = proj[visible]
-                    values = values[visible]
+                    if np.any(visible):
+                        proj = proj[visible]
+                        values = values[visible]
+                    else:
+                        proj = proj_unoccluded
+                        values = values_unoccluded
                 proj = np.nan_to_num(proj, nan=-1e6, posinf=-1e6, neginf=-1e6)
                 pts = proj.astype(np.int32)
                 if pts.size == 0:
@@ -652,14 +659,15 @@ def main() -> None:
                     mask = np.zeros((height, width), dtype=np.uint8)
                     for (u, v), value in zip(pts, values):
                         if 0 <= u < width and 0 <= v < height:
-                            r = max(10, int(8 + value * 18))
+                            r = max(14, int(12 + value * 24))
                             x0, y0 = max(0, u - r), max(0, v - r)
                             x1, y1 = min(width - 1, u + r), min(height - 1, v + r)
                             cv2.rectangle(mask, (x0, y0), (x1, y1), 255, thickness=-1)
-                    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (35, 35))
+                    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (45, 45))
                     mask = cv2.dilate(mask, kernel, iterations=1)
                     if floor_mask is not None:
                         mask = cv2.bitwise_and(mask, floor_mask)
+                    mask = cv2.GaussianBlur(mask, (0, 0), 3)
                     fill_color = np.array(base_color, dtype=np.float32)
                     alpha = 0.42 if is_trip else 0.52
                     if name == "hotspot":
