@@ -16,6 +16,46 @@ from .utils_colmap import (
 )
 
 
+def _room_key(name: str) -> str:
+    return name.strip().lower().replace(" ", "_")
+
+
+ROOM_SEMANTIC_OVERRIDES: Dict[str, Dict[str, float]] = {
+    "living_room": {
+        "rug_weight": 1.3,
+        "rug_slip_weight": 1.2,
+        "table_weight": 0.8,
+        "smooth_floor_trip_weight": 0.35,
+    },
+    "bedroom": {
+        "rug_weight": 1.15,
+        "table_weight": 0.6,
+        "smooth_floor_trip_weight": 0.3,
+    },
+    "bathroom": {
+        "rug_weight": 0.9,
+        "rug_slip_weight": 1.45,
+        "smooth_floor_trip_weight": 0.2,
+    },
+    "kitchen": {
+        "table_weight": 0.7,
+        "smooth_floor_trip_weight": 0.25,
+    },
+    "hallway": {
+        "smooth_floor_trip_weight": 0.35,
+    },
+}
+
+
+ROOM_SEMANTIC_MULTIPLIERS: Dict[str, Dict[str, float]] = {
+    "living_room": {"trip": 1.2, "obstacle": 1.1},
+    "bedroom": {"trip": 1.1, "obstacle": 1.2},
+    "bathroom": {"slip": 1.35},
+    "kitchen": {"slip": 1.25, "obstacle": 1.1},
+    "hallway": {"trip": 1.3},
+}
+
+
 @dataclass
 class SemanticConfig:
     score_threshold: float = 0.45
@@ -143,7 +183,17 @@ def _load_room_metadata(workdir: Path) -> Dict[str, object]:
         cfg = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
     except Exception:
         return {}
-    return cfg.get("room", {}) or {}
+    room = cfg.get("room", {}) or {}
+    room_name = (
+        cfg.get("room_name")
+        or cfg.get("room_type")
+        or room.get("room_name")
+        or room.get("name")
+        or room.get("type")
+    )
+    if room_name:
+        room["room_name"] = room_name
+    return room
 
 
 def _load_model(device: str):
@@ -251,6 +301,13 @@ def compute_semantic_hazards(
 
     scale, center = _load_scale_transform(workdir)
     room_meta = _load_room_metadata(workdir)
+    room_name = str(room_meta.get("room_name") or "").strip()
+    room_key = _room_key(room_name) if room_name else ""
+    if room_key in ROOM_SEMANTIC_OVERRIDES:
+        overrides = ROOM_SEMANTIC_OVERRIDES[room_key]
+        for key, val in overrides.items():
+            if hasattr(config, key):
+                setattr(config, key, val)
 
     frame_paths = sorted(frames_dir.glob("*.jpg"))
     if not frame_paths:
@@ -478,6 +535,12 @@ def compute_semantic_hazards(
     for key in hazard_grids:
         hazard_grids[key] = _normalize_grid(hazard_grids[key])
 
+    if room_key in ROOM_SEMANTIC_MULTIPLIERS:
+        multipliers = ROOM_SEMANTIC_MULTIPLIERS[room_key]
+        for hazard, mult in multipliers.items():
+            if hazard in hazard_grids:
+                hazard_grids[hazard] = np.clip(hazard_grids[hazard] * mult, 0.0, 1.0)
+
     out_path.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(out_path, **hazard_grids)
 
@@ -486,6 +549,7 @@ def compute_semantic_hazards(
             "frames_processed": processed,
             "labels_detected": label_counts,
             "rug_like_points": rug_points,
+            "room_name": room_name or None,
         }
         summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
 

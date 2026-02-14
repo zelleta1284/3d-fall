@@ -61,6 +61,7 @@ class RoomSpec:
     obstacle_height_m: float
     default_friction: float
     friction_zones: List[Dict]
+    name: Optional[str] = None
     floor_material: Optional[str] = None
     floor_material_confidence: Optional[float] = None
     floor_material_applied: Optional[bool] = None
@@ -82,6 +83,84 @@ class SimConfig:
 
 def _safe_float(val: Optional[float], default: float) -> float:
     return float(val) if val is not None else float(default)
+
+
+def _room_key(name: Optional[str]) -> str:
+    if not name:
+        return ""
+    return str(name).strip().lower().replace(" ", "_")
+
+
+ROOM_RISK_PROFILES: Dict[str, Dict[str, object]] = {
+    "living_room": {
+        "weights": {"trip": 1.2, "obstacle": 1.1, "glare": 1.1},
+        "semantic_weight": 1.2,
+        "coverage_weight": 0.35,
+    },
+    "bedroom": {
+        "weights": {"obstacle": 1.2, "trip": 1.1, "turn": 1.1},
+        "semantic_weight": 1.1,
+        "coverage_weight": 0.4,
+    },
+    "bathroom": {
+        "weights": {"slip": 1.4, "glare": 1.1},
+        "semantic_weight": 1.1,
+        "coverage_weight": 0.45,
+        "glare_slip_weight": 0.7,
+    },
+    "kitchen": {
+        "weights": {"slip": 1.3, "obstacle": 1.1},
+        "semantic_weight": 1.05,
+        "coverage_weight": 0.4,
+    },
+    "hallway": {
+        "weights": {"trip": 1.3, "turn": 1.2},
+        "semantic_weight": 1.05,
+        "coverage_weight": 0.35,
+    },
+}
+
+
+def _apply_room_profile(cfg: "SimConfig") -> Dict[str, object]:
+    effects: Dict[str, object] = {"room_profile": None, "adjustments": []}
+    room_key = _room_key(cfg.room.name)
+    if not room_key or room_key not in ROOM_RISK_PROFILES:
+        return effects
+    profile = ROOM_RISK_PROFILES[room_key]
+    effects["room_profile"] = room_key
+
+    def record(field: str, old: float, new: float, reason: str) -> None:
+        if abs(old - new) > 1e-6:
+            effects["adjustments"].append(
+                {"field": field, "from": float(old), "to": float(new), "reason": reason}
+            )
+
+    weights = profile.get("weights", {})
+    for name, mult in weights.items():
+        old = getattr(cfg.risk.weights, name)
+        new = old * float(mult)
+        setattr(cfg.risk.weights, name, new)
+        record(f"risk.weights.{name}", old, new, f"room={room_key}")
+
+    if "semantic_weight" in profile:
+        old = cfg.risk.semantic_weight
+        new = float(profile["semantic_weight"])
+        cfg.risk.semantic_weight = new
+        record("risk.semantic_weight", old, new, f"room={room_key}")
+
+    if "coverage_weight" in profile:
+        old = cfg.risk.coverage_weight
+        new = float(profile["coverage_weight"])
+        cfg.risk.coverage_weight = new
+        record("risk.coverage_weight", old, new, f"room={room_key}")
+
+    if "glare_slip_weight" in profile:
+        old = cfg.risk.glare_slip_weight
+        new = float(profile["glare_slip_weight"])
+        cfg.risk.glare_slip_weight = new
+        record("risk.glare_slip_weight", old, new, f"room={room_key}")
+
+    return effects
 
 
 def load_config(path: Path) -> SimConfig:
@@ -110,11 +189,19 @@ def load_config(path: Path) -> SimConfig:
     )
 
     room_cfg = cfg.get("room", {})
+    room_name = (
+        cfg.get("room_name")
+        or cfg.get("room_type")
+        or room_cfg.get("room_name")
+        or room_cfg.get("name")
+        or room_cfg.get("type")
+    )
     room = RoomSpec(
         grid_size_m=_safe_float(room_cfg.get("grid_size_m"), 0.05),
         obstacle_height_m=_safe_float(room_cfg.get("obstacle_height_m"), 0.2),
         default_friction=_safe_float(room_cfg.get("default_friction"), 0.6),
         friction_zones=room_cfg.get("friction_zones", []),
+        name=str(room_name) if room_name else None,
         floor_material=room_cfg.get("floor_material"),
         floor_material_confidence=room_cfg.get("floor_material_confidence"),
         floor_material_applied=room_cfg.get("floor_material_applied"),
@@ -445,6 +532,7 @@ def simulate_risk(mesh_path: Path, config_path: Path, out_dir: Path) -> Path:
     import matplotlib.pyplot as plt
 
     cfg = load_config(config_path)
+    room_effects = _apply_room_profile(cfg)
     patient_effects = _apply_patient_intake(cfg)
     vertices = load_mesh_vertices(mesh_path)
     floor_z = float(np.percentile(vertices[:, 2], 2))
@@ -607,7 +695,7 @@ def simulate_risk(mesh_path: Path, config_path: Path, out_dir: Path) -> Path:
 
     interpretation = {
         "room": {
-            "room_name": cfg.patient.get("room_name") if isinstance(cfg.patient, dict) else None,
+            "room_name": cfg.room.name or (cfg.patient.get("room_name") if isinstance(cfg.patient, dict) else None),
             "floor_z_estimate_m": floor_z,
             "ceiling_z_estimate_m": ceil_z,
             "height_span_m": float(ceil_z - floor_z),
@@ -624,9 +712,11 @@ def simulate_risk(mesh_path: Path, config_path: Path, out_dir: Path) -> Path:
             "friction_zones": len(cfg.room.friction_zones),
             "lighting_windows": len(cfg.lighting.windows) if cfg.lighting else 0,
             "lighting_lights": len(cfg.lighting.lights) if cfg.lighting else 0,
+            "room_profile_applied": room_effects.get("room_profile"),
         },
         "patient": cfg.patient or {},
         "patient_effects": patient_effects,
+        "room_effects": room_effects,
         "notes": [
             "Floor/ceiling estimated from z-percentiles of mesh vertices.",
             "Obstacles defined as heights above floor_z + obstacle_height_threshold_m.",
@@ -634,6 +724,7 @@ def simulate_risk(mesh_path: Path, config_path: Path, out_dir: Path) -> Path:
             "Coverage mode may add risk across the entire grid in addition to simulated paths.",
             "Semantic hazards (if enabled) inject object-detection cues into obstacle/trip/turn maps.",
             "Patient intake may adjust parameters; see patient_effects.adjustments.",
+            "Room profiles adjust baseline hazard weights based on room type.",
         ],
     }
     interp_path = out_dir / "room_interpretation.json"
@@ -643,7 +734,8 @@ def simulate_risk(mesh_path: Path, config_path: Path, out_dir: Path) -> Path:
     patient_out = {
         "patient": cfg.patient or {},
         "patient_effects": patient_effects,
-        "room_name": cfg.patient.get("room_name") if isinstance(cfg.patient, dict) else None,
+        "room_name": cfg.room.name or (cfg.patient.get("room_name") if isinstance(cfg.patient, dict) else None),
+        "room_effects": room_effects,
     }
     patient_path = out_dir / "patient_inference.json"
     with patient_path.open("w", encoding="utf-8") as f:
