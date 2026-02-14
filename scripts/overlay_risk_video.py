@@ -374,6 +374,11 @@ def main() -> None:
     )
     parser.add_argument("--detect-rug", action="store_true", help="Add a rug heuristic box")
     parser.add_argument("--detect-hardwood", action="store_true", help="Add hardwood floor box")
+    parser.add_argument("--callouts", dest="callouts", action="store_true", help="Draw callout markers instead of large overlays")
+    parser.add_argument("--no-callouts", dest="callouts", action="store_false", help="Disable callout markers")
+    parser.add_argument("--callout-max", type=int, default=120, help="Max callout points per layer")
+    parser.add_argument("--callout-labels", dest="callout_labels", action="store_true", help="Draw labels for top callouts")
+    parser.add_argument("--no-callout-labels", dest="callout_labels", action="store_false", help="Disable callout labels")
     parser.add_argument("--include-all-trip-slip", dest="include_all_trip_slip", action="store_true", help="Render all nonzero trip/slip cells")
     parser.add_argument("--no-include-all-trip-slip", dest="include_all_trip_slip", action="store_false", help="Allow quantile sampling for trip/slip")
     parser.add_argument("--no-minimap", dest="show_minimap", action="store_false", help="Disable mini-map inset")
@@ -387,6 +392,8 @@ def main() -> None:
         skip_occlusion_for_risk=True,
         full_floor_heat=False,
         path_only=False,
+        callouts=True,
+        callout_labels=True,
     )
     args = parser.parse_args()
 
@@ -872,6 +879,57 @@ def main() -> None:
                     override = semantic_color_overrides.get(name)
                     if override is not None:
                         base_color = np.array(override, dtype=np.int32)
+                    if args.callouts:
+                        # Draw small callout markers instead of large shaded regions.
+                        order = np.argsort(values)[::-1]
+                        if order.size > args.callout_max:
+                            order = order[: args.callout_max]
+                        label_name = name
+                        if name == "semantic_trip":
+                            label_name = "rug"
+                        elif name == "semantic_obstacle":
+                            label_name = "table"
+                        elif name == "semantic_slip":
+                            label_name = "slip area"
+                        elif name == "hotspot":
+                            label_name = "hotspot"
+                        elif name == "obstacle":
+                            label_name = "obstacle"
+                        elif name == "trip":
+                            label_name = "trip"
+                        elif name == "slip":
+                            label_name = "slip"
+                        for k, idx_pt in enumerate(order):
+                            u, v = pts[idx_pt]
+                            if 0 <= u < width and 0 <= v < height:
+                                size = 5 if values[idx_pt] < 0.5 else 7
+                                cv2.rectangle(
+                                    overlay,
+                                    (u - size, v - size),
+                                    (u + size, v + size),
+                                    tuple(int(c) for c in base_color),
+                                    thickness=-1,
+                                )
+                                cv2.circle(
+                                    overlay,
+                                    (u, v),
+                                    size + 2,
+                                    tuple(int(c) for c in base_color),
+                                    thickness=1,
+                                )
+                                if args.callout_labels and k < 6:
+                                    text = label_name
+                                    cv2.putText(
+                                        overlay,
+                                        text,
+                                        (u + 8, max(10, v - 8)),
+                                        cv2.FONT_HERSHEY_SIMPLEX,
+                                        0.45,
+                                        tuple(int(c) for c in base_color),
+                                        1,
+                                        cv2.LINE_AA,
+                                    )
+                        continue
                     # Hard color bands: draw separate masks by value buckets.
                     low_mask = np.zeros((height, width), dtype=np.uint8)
                     mid_mask = np.zeros((height, width), dtype=np.uint8)
@@ -944,7 +1002,7 @@ def main() -> None:
                         risk_any_mask = raw_mask.copy()
                     else:
                         risk_any_mask = cv2.bitwise_or(risk_any_mask, raw_mask)
-            if not args.path_only and floor_mask is not None and risk_any_mask is not None:
+            if not args.callouts and not args.path_only and floor_mask is not None and risk_any_mask is not None:
                 # If the overlay coverage is still tiny, softly shade the full floor to ensure visibility.
                 coverage = float(np.count_nonzero(risk_any_mask)) / float(height * width)
                 if coverage < 0.12:
