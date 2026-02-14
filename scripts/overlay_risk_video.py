@@ -281,33 +281,6 @@ def _rug_heuristic(frame_bgr: np.ndarray) -> Optional[Tuple[int, int, int, int]]
     return (x_min, y_min + y0, x_max, y_max + y0)
 
 
-def _lamp_heuristic(frame_bgr: np.ndarray) -> List[Tuple[int, int, int, int]]:
-    h, w = frame_bgr.shape[:2]
-    roi_h = int(h * 0.6)
-    roi = frame_bgr[:roi_h, :]
-    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-    _, th = cv2.threshold(gray, 205, 255, cv2.THRESH_BINARY)
-    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
-    th = cv2.morphologyEx(th, cv2.MORPH_CLOSE, k, iterations=1)
-    contours, _ = cv2.findContours(th, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    boxes: List[Tuple[int, int, int, int]] = []
-    for cnt in contours:
-        x, y, bw, bh = cv2.boundingRect(cnt)
-        area = bw * bh
-        if area < 0.002 * (w * roi_h):
-            continue
-        aspect = bw / float(bh + 1e-6)
-        if aspect < 0.5 or aspect > 2.2:
-            continue
-        # extend downwards to include lamp stand
-        x0 = max(0, x - int(0.1 * bw))
-        x1 = min(w - 1, x + bw + int(0.1 * bw))
-        y0 = max(0, y - int(0.1 * bh))
-        y1 = min(h - 1, y + int(2.0 * bh))
-        boxes.append((x0, y0, x1, y1))
-    return boxes[:3]
-
-
 def _hardwood_heuristic(frame_bgr: np.ndarray) -> Optional[Tuple[int, int, int, int]]:
     h, w = frame_bgr.shape[:2]
     y0 = int(h * 0.5)
@@ -400,7 +373,6 @@ def main() -> None:
         help="Comma-separated class filter (COCO names). Empty = all",
     )
     parser.add_argument("--detect-rug", action="store_true", help="Add a rug heuristic box")
-    parser.add_argument("--detect-lamp", action="store_true", help="Add lamp heuristic boxes")
     parser.add_argument("--detect-hardwood", action="store_true", help="Add hardwood floor box")
     parser.add_argument("--include-all-trip-slip", dest="include_all_trip_slip", action="store_true", help="Render all nonzero trip/slip cells")
     parser.add_argument("--no-include-all-trip-slip", dest="include_all_trip_slip", action="store_false", help="Allow quantile sampling for trip/slip")
@@ -819,6 +791,8 @@ def main() -> None:
                 depth_m = last_depth
 
             risk_any_mask = None
+            trip_mask_accum = None
+            slip_mask_accum = None
             for layer in component_layers:
                 proj, valid, depths = _project_points(layer["points"], camera, cameras)
                 if proj.size == 0:
@@ -962,6 +936,10 @@ def main() -> None:
                                 overlay[band_mask > 0].astype(np.float32) * (1.0 - alpha)
                                 + fill_color * alpha
                             ).astype(np.uint8)
+                    if is_trip:
+                        trip_mask_accum = raw_mask if trip_mask_accum is None else cv2.bitwise_or(trip_mask_accum, raw_mask)
+                    if is_slip:
+                        slip_mask_accum = raw_mask if slip_mask_accum is None else cv2.bitwise_or(slip_mask_accum, raw_mask)
                     if risk_any_mask is None:
                         risk_any_mask = raw_mask.copy()
                     else:
@@ -1011,6 +989,16 @@ def main() -> None:
                     blended = cv2.addWeighted(inset, args.minimap_alpha, roi, 1.0 - args.minimap_alpha, 0)
                     frame[y1:y1 + inset_h, x1:x1 + inset_w] = blended
                     cv2.rectangle(frame, (x1 - 2, y1 - 2), (x1 + inset_w + 2, y1 + inset_h + 2), (255, 255, 255), 1)
+            # Add trip/slip risk badges to make hazard types explicit.
+            badge_x, badge_y = 12, height - 60
+            badge_w, badge_h = 130, 22
+            if trip_mask_accum is not None:
+                cv2.rectangle(frame, (badge_x, badge_y), (badge_x + badge_w, badge_y + badge_h), component_colors["trip"], thickness=-1)
+                cv2.putText(frame, "Trip risk", (badge_x + 6, badge_y + 15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+                badge_y -= 26
+            if slip_mask_accum is not None:
+                cv2.rectangle(frame, (badge_x, badge_y), (badge_x + badge_w, badge_y + badge_h), component_colors["slip"], thickness=-1)
+                cv2.putText(frame, "Slip risk", (badge_x + 6, badge_y + 15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
             if args.full_floor_heat and floor_heat is not None:
                 y_start = int(height * args.full_floor_heat_top)
                 if y_start < height:
@@ -1036,9 +1024,6 @@ def main() -> None:
                         rug_box = _rug_heuristic(raw_frame)
                         if rug_box:
                             last_dets.append({"box": rug_box, "label": "rug", "score": 1.0})
-                    if args.detect_lamp:
-                        for lamp_box in _lamp_heuristic(raw_frame):
-                            last_dets.append({"box": lamp_box, "label": "lamp", "score": 1.0})
                     if args.detect_hardwood:
                         hardwood_box = _hardwood_heuristic(raw_frame)
                         if hardwood_box:
@@ -1056,8 +1041,6 @@ def main() -> None:
                     color = (0, 0, 255)
                     if label == "rug":
                         color = (180, 0, 255)
-                    elif label == "lamp":
-                        color = (0, 255, 255)
                     elif label == "hardwood floor":
                         color = (19, 69, 139)
                     _draw_box(frame, tuple(int(v) for v in box), color, label)
