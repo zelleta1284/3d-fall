@@ -327,7 +327,7 @@ def main() -> None:
     parser.add_argument("--full-floor-heat-top", type=float, default=0.35, help="Top ratio for full-floor heat band")
     parser.add_argument("--path-only", dest="path_only", action="store_true", help="Restrict overlays to walking path corridor")
     parser.add_argument("--no-path-only", dest="path_only", action="store_false", help="Do not restrict overlays to walking path corridor")
-    parser.add_argument("--path-width", type=int, default=30, help="Half-width (px) of walking path corridor")
+    parser.add_argument("--path-width", type=int, default=20, help="Half-width (px) of walking path corridor")
     parser.add_argument("--detect-objects", action="store_true", help="Draw object detection boxes")
     parser.add_argument("--detect-every", type=int, default=5, help="Run object detection every N frames")
     parser.add_argument("--detect-score", type=float, default=0.5, help="Detection confidence threshold")
@@ -841,7 +841,7 @@ def main() -> None:
                     high_mask = np.zeros((height, width), dtype=np.uint8)
                     for (u, v), value in zip(pts, values):
                         if 0 <= u < width and 0 <= v < height:
-                            r = max(18, int(20 + value * 32))
+                            r = max(10, int(12 + value * 18))
                             x0, y0 = max(0, u - r), max(0, v - r)
                             x1, y1 = min(width - 1, u + r), min(height - 1, v + r)
                             if value >= 0.66:
@@ -850,7 +850,7 @@ def main() -> None:
                                 cv2.rectangle(mid_mask, (x0, y0), (x1, y1), 255, thickness=-1)
                             else:
                                 cv2.rectangle(low_mask, (x0, y0), (x1, y1), 255, thickness=-1)
-                    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (41, 41))
+                    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 25))
                     low_mask = cv2.dilate(low_mask, kernel, iterations=1)
                     mid_mask = cv2.dilate(mid_mask, kernel, iterations=1)
                     high_mask = cv2.dilate(high_mask, kernel, iterations=1)
@@ -972,7 +972,7 @@ def main() -> None:
                     if args.detect_rug:
                         rug_box = _rug_heuristic(raw_frame)
                         if rug_box:
-                            last_dets.append({"box": rug_box, "label": "rug (heuristic)", "score": 1.0})
+                            last_dets.append({"box": rug_box, "label": "rug", "score": 1.0})
                 for det in last_dets:
                     box = det["box"]
                     label = str(det["label"])
