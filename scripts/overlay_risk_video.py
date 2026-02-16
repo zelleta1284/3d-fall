@@ -399,6 +399,25 @@ def _draw_ot_chat(frame: np.ndarray, notes: List[str], max_items: int) -> None:
         shown += 1
 
 
+def _draw_dme_strip(frame: np.ndarray, notes: List[str], max_items: int) -> None:
+    if not notes:
+        return
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    scale = 0.5
+    thickness = 1
+    pad = 8
+    line_h = 22
+    x0 = 12
+    y0 = frame.shape[0] - 12
+    box_w = min(frame.shape[1] - 24, 520)
+    shown = 0
+    for text in notes[-max_items:]:
+        y = y0 - shown * line_h
+        cv2.rectangle(frame, (x0, y - line_h - 2), (x0 + box_w, y + 2), (0, 0, 0), thickness=-1)
+        cv2.putText(frame, text, (x0 + pad, y - 6), font, scale, (255, 255, 255), thickness, cv2.LINE_AA)
+        shown += 1
+
+
 def _ot_llm_note(
     hazards: List[str],
     model: str,
@@ -517,6 +536,10 @@ def main() -> None:
     parser.add_argument("--no-ot-chat", dest="ot_chat", action="store_false", help="Disable OT chat notes")
     parser.add_argument("--ot-chat-max", type=int, default=4, help="Max OT chat lines")
     parser.add_argument("--ot-chat-period", type=float, default=1.8, help="Seconds between OT chat notes")
+    parser.add_argument("--dme-notes", dest="dme_notes", action="store_true", help="Show DME recommendations at bottom")
+    parser.add_argument("--no-dme-notes", dest="dme_notes", action="store_false", help="Disable DME recommendations")
+    parser.add_argument("--dme-period", type=float, default=2.5, help="Seconds between DME notes")
+    parser.add_argument("--dme-max", type=int, default=2, help="Max DME lines at bottom")
     parser.add_argument("--ot-llm", dest="ot_llm", action="store_true", help="Use OpenAI to generate OT note text")
     parser.add_argument("--no-ot-llm", dest="ot_llm", action="store_false", help="Disable OpenAI OT notes")
     parser.add_argument("--ot-model", type=str, default="gpt-4o-mini", help="OpenAI model for OT notes")
@@ -542,6 +565,7 @@ def main() -> None:
         risk_badges=False,
         ot_llm=False,
         ot_chat=True,
+        dme_notes=True,
     )
     args = parser.parse_args()
 
@@ -878,6 +902,9 @@ def main() -> None:
     ot_chat_expiry: List[int] = []
     ot_chat_idx: int = 0
     ot_recent_notes: List[str] = []
+    dme_notes: List[str] = []
+    dme_expiry: List[int] = []
+    dme_recent: List[str] = []
     class_filter: Optional[set] = None
     if args.detect_objects:
         detector = _load_detector()
@@ -960,6 +987,8 @@ def main() -> None:
             slip_mask_accum = None
             hazard_callouts: List[Tuple[str, Tuple[int, int]]] = []
             hazard_tags: List[str] = []
+            rug_detected = False
+            hardwood_detected = False
             for layer in component_layers:
                 proj, valid, depths = _project_points(layer["points"], camera, cameras)
                 if proj.size == 0:
@@ -1258,10 +1287,12 @@ def main() -> None:
                         rug_box = _rug_heuristic(raw_frame)
                         if rug_box:
                             last_dets.append({"box": rug_box, "label": "rug", "score": 1.0})
+                            rug_detected = True
                     if args.detect_hardwood:
                         hardwood_box = _hardwood_heuristic(raw_frame)
                         if hardwood_box:
                             last_dets.append({"box": hardwood_box, "label": "hardwood floor", "score": 1.0})
+                            hardwood_detected = True
                 for det in last_dets:
                     box = det["box"]
                     label = str(det["label"])
@@ -1359,6 +1390,12 @@ def main() -> None:
                         "OT: Keep frequently used items within easy reach.",
                         "OT: Remove clutter near seating and exits.",
                     ]
+                    if rug_detected:
+                        base_notes.append("OT: Rug present; secure edges with non-slip backing.")
+                        unique.append("rug")
+                    if hardwood_detected:
+                        base_notes.append("OT: Slick flooring noted; prioritize traction.")
+                        unique.append("hardwood")
                     notes_map = {
                         "table": [
                             "OT: Low table edges in path; pad or reposition.",
@@ -1375,6 +1412,12 @@ def main() -> None:
                         "obstacle": [
                             "OT: Narrow path; remove obstacles for clearance.",
                             "OT: Widen walkway to reduce collision risk.",
+                        ],
+                        "rug": [
+                            "OT: Rug edge lift noted; use non-slip pad or tape.",
+                        ],
+                        "hardwood": [
+                            "OT: Polished floor; consider grip socks or runners.",
                         ],
                     }
                     candidates = []
@@ -1404,6 +1447,43 @@ def main() -> None:
                 ot_chat_notes = active_notes
                 ot_chat_expiry = active_exp
                 _draw_ot_chat(frame, ot_chat_notes, args.ot_chat_max)
+            if args.dme_notes:
+                dme_period = max(1, int(args.dme_period * video_fps))
+                if frame_idx % dme_period == 0:
+                    dme_candidates = []
+                    if rug_detected:
+                        dme_candidates.append("DME: Non-slip rug pad; place under area rug.")
+                    if hardwood_detected:
+                        dme_candidates.append("DME: Traction strips in main walking path.")
+                    if "table" in hazard_tags:
+                        dme_candidates.append("DME: Corner guards on coffee table edges.")
+                    if "slip" in hazard_tags:
+                        dme_candidates.append("DME: Non-slip socks or footwear.")
+                    if "trip" in hazard_tags:
+                        dme_candidates.append("DME: Secure cords with floor cable covers.")
+                    if not dme_candidates:
+                        dme_candidates.append("DME: Nightlight for pathway visibility.")
+                    dme_note = None
+                    for cand in dme_candidates:
+                        if cand not in dme_recent:
+                            dme_note = cand
+                            break
+                    if dme_note is None:
+                        dme_recent = []
+                        dme_note = dme_candidates[0]
+                    dme_recent.append(dme_note)
+                    dme_recent = dme_recent[-6:]
+                    dme_notes.append(dme_note)
+                    dme_expiry.append(frame_idx + int(7 * video_fps))
+                active_notes = []
+                active_exp = []
+                for note, exp in zip(dme_notes, dme_expiry):
+                    if frame_idx <= exp:
+                        active_notes.append(note)
+                        active_exp.append(exp)
+                dme_notes = active_notes
+                dme_expiry = active_exp
+                _draw_dme_strip(frame, dme_notes, args.dme_max)
         if args.show_split and frame_idx < split_frames:
             split_x = width // 2
             combined = raw_frame.copy()
