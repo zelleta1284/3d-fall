@@ -356,7 +356,7 @@ def _draw_ot_callouts(
         if shown >= max_items:
             break
         y = y0 + shown * (box_h + 8)
-        # Background box
+        # Background box (black) + white text
         cv2.rectangle(frame, (x0, y - box_h + 2), (x0 + box_w, y + 2), color, thickness=-1)
         cv2.putText(frame, text, (x0 + 6, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
         # Leader line to anchor point
@@ -434,6 +434,9 @@ def main() -> None:
     parser.add_argument("--ot-annotate", dest="ot_annotate", action="store_true", help="Add OT-style annotation callouts")
     parser.add_argument("--no-ot-annotate", dest="ot_annotate", action="store_false", help="Disable OT-style annotations")
     parser.add_argument("--ot-max", type=int, default=3, help="Max OT callouts per frame")
+    parser.add_argument("--ot-duration", type=float, default=1.5, help="Seconds to keep OT callouts on screen")
+    parser.add_argument("--risk-badges", dest="risk_badges", action="store_true", help="Show trip/slip badges")
+    parser.add_argument("--no-risk-badges", dest="risk_badges", action="store_false", help="Hide trip/slip badges")
     parser.add_argument("--include-all-trip-slip", dest="include_all_trip_slip", action="store_true", help="Render all nonzero trip/slip cells")
     parser.add_argument("--no-include-all-trip-slip", dest="include_all_trip_slip", action="store_false", help="Allow quantile sampling for trip/slip")
     parser.add_argument("--no-minimap", dest="show_minimap", action="store_false", help="Disable mini-map inset")
@@ -450,6 +453,7 @@ def main() -> None:
         callouts=True,
         callout_labels=True,
         ot_annotate=True,
+        risk_badges=False,
     )
     args = parser.parse_args()
 
@@ -777,6 +781,7 @@ def main() -> None:
     detector = None
     last_dets: List[Dict[str, object]] = []
     ot_callouts: List[Tuple[str, Tuple[int, int]]] = []
+    ot_expiry: List[int] = []
     class_filter: Optional[set] = None
     if args.detect_objects:
         detector = _load_detector()
@@ -1104,16 +1109,17 @@ def main() -> None:
                     blended = cv2.addWeighted(inset, args.minimap_alpha, roi, 1.0 - args.minimap_alpha, 0)
                     frame[y1:y1 + inset_h, x1:x1 + inset_w] = blended
                     cv2.rectangle(frame, (x1 - 2, y1 - 2), (x1 + inset_w + 2, y1 + inset_h + 2), (255, 255, 255), 1)
-            # Add trip/slip risk badges to make hazard types explicit.
-            badge_x, badge_y = 12, height - 60
-            badge_w, badge_h = 130, 22
-            if trip_mask_accum is not None:
-                cv2.rectangle(frame, (badge_x, badge_y), (badge_x + badge_w, badge_y + badge_h), component_colors["trip"], thickness=-1)
-                cv2.putText(frame, "Trip risk", (badge_x + 6, badge_y + 15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
-                badge_y -= 26
-            if slip_mask_accum is not None:
-                cv2.rectangle(frame, (badge_x, badge_y), (badge_x + badge_w, badge_y + badge_h), component_colors["slip"], thickness=-1)
-                cv2.putText(frame, "Slip risk", (badge_x + 6, badge_y + 15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+            if args.risk_badges:
+                # Add trip/slip risk badges to make hazard types explicit.
+                badge_x, badge_y = 12, height - 60
+                badge_w, badge_h = 130, 22
+                if trip_mask_accum is not None:
+                    cv2.rectangle(frame, (badge_x, badge_y), (badge_x + badge_w, badge_y + badge_h), component_colors["trip"], thickness=-1)
+                    cv2.putText(frame, "Trip risk", (badge_x + 6, badge_y + 15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+                    badge_y -= 26
+                if slip_mask_accum is not None:
+                    cv2.rectangle(frame, (badge_x, badge_y), (badge_x + badge_w, badge_y + badge_h), component_colors["slip"], thickness=-1)
+                    cv2.putText(frame, "Slip risk", (badge_x + 6, badge_y + 15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
             if args.full_floor_heat and floor_heat is not None:
                 y_start = int(height * args.full_floor_heat_top)
                 if y_start < height:
@@ -1126,24 +1132,25 @@ def main() -> None:
                     else:
                         blended = cv2.addWeighted(heat_band, args.full_floor_heat_alpha, heat_roi, 1.0 - args.full_floor_heat_alpha, 0)
                         frame[y_start:height, 0:width] = blended
-            if args.detect_objects and detector is not None:
-                if frame_idx % max(args.detect_every, 1) == 0:
-                    last_dets = _detect_objects(
-                        detector,
-                        raw_frame,
-                        score_thresh=args.detect_score,
-                        max_dets=args.detect_max,
-                        class_filter=class_filter,
-                    )
-                    if args.detect_rug:
-                        rug_box = _rug_heuristic(raw_frame)
-                        if rug_box:
-                            last_dets.append({"box": rug_box, "label": "rug", "score": 1.0})
-                    if args.detect_hardwood:
-                        hardwood_box = _hardwood_heuristic(raw_frame)
-                        if hardwood_box:
-                            last_dets.append({"box": hardwood_box, "label": "hardwood floor", "score": 1.0})
+                if args.detect_objects and detector is not None:
+                    if frame_idx % max(args.detect_every, 1) == 0:
+                        last_dets = _detect_objects(
+                            detector,
+                            raw_frame,
+                            score_thresh=args.detect_score,
+                            max_dets=args.detect_max,
+                            class_filter=class_filter,
+                        )
+                        if args.detect_rug:
+                            rug_box = _rug_heuristic(raw_frame)
+                            if rug_box:
+                                last_dets.append({"box": rug_box, "label": "rug", "score": 1.0})
+                        if args.detect_hardwood:
+                            hardwood_box = _hardwood_heuristic(raw_frame)
+                            if hardwood_box:
+                                last_dets.append({"box": hardwood_box, "label": "hardwood floor", "score": 1.0})
                 ot_callouts = []
+                ot_expiry = []
                 for det in last_dets:
                     box = det["box"]
                     label = str(det["label"])
@@ -1155,10 +1162,9 @@ def main() -> None:
                     if label == "tv":
                         label = "tv"
                     color = (0, 0, 255)
-                    if label == "rug":
-                        color = (180, 0, 255)
-                    elif label == "hardwood floor":
-                        color = (19, 69, 139)
+                    if label in {"rug", "hardwood floor"}:
+                        # Skip visual boxes for rug/hardwood per request.
+                        continue
                     _draw_box(frame, tuple(int(v) for v in box), color, label)
                     if label == "table":
                         x1, y1, x2, y2 = [int(v) for v in box]
@@ -1179,8 +1185,14 @@ def main() -> None:
                     if msg:
                         x1, y1, x2, y2 = [int(v) for v in box]
                         ot_callouts.append((msg, (x1 + (x2 - x1) // 2, y1 + (y2 - y1) // 2)))
+                        ot_expiry.append(frame_idx + int(args.ot_duration * video_fps))
             if args.ot_annotate and ot_callouts:
-                _draw_ot_callouts(frame, ot_callouts, (0, 0, 0), args.ot_max)
+                active = [
+                    (callout, anchor)
+                    for (callout, anchor), exp in zip(ot_callouts, ot_expiry)
+                    if frame_idx <= exp
+                ]
+                _draw_ot_callouts(frame, active, (0, 0, 0), args.ot_max)
         if args.show_split and frame_idx < split_frames:
             split_x = width // 2
             combined = raw_frame.copy()
