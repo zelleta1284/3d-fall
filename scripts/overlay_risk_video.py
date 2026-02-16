@@ -382,6 +382,23 @@ def _draw_ot_note(frame: np.ndarray, text: str) -> None:
     cv2.putText(frame, text, (x0 + pad, y0 - 6), font, scale, (255, 255, 255), thickness, cv2.LINE_AA)
 
 
+def _draw_ot_chat(frame: np.ndarray, notes: List[str], max_items: int) -> None:
+    if not notes:
+        return
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    scale = 0.5
+    thickness = 1
+    x0, y0 = 12, 26
+    line_h = 22
+    box_w = 420
+    shown = 0
+    for text in notes[-max_items:]:
+        y = y0 + shown * line_h
+        cv2.rectangle(frame, (x0, y - line_h + 4), (x0 + box_w, y + 4), (0, 0, 0), thickness=-1)
+        cv2.putText(frame, text, (x0 + 8, y), font, scale, (255, 255, 255), thickness, cv2.LINE_AA)
+        shown += 1
+
+
 def _ot_llm_note(
     hazards: List[str],
     model: str,
@@ -496,6 +513,10 @@ def main() -> None:
     parser.add_argument("--no-ot-annotate", dest="ot_annotate", action="store_false", help="Disable OT-style annotations")
     parser.add_argument("--ot-max", type=int, default=3, help="Max OT callouts per frame")
     parser.add_argument("--ot-duration", type=float, default=1.5, help="Seconds to keep OT callouts on screen")
+    parser.add_argument("--ot-chat", dest="ot_chat", action="store_true", help="Show OT notes as a running chat")
+    parser.add_argument("--no-ot-chat", dest="ot_chat", action="store_false", help="Disable OT chat notes")
+    parser.add_argument("--ot-chat-max", type=int, default=4, help="Max OT chat lines")
+    parser.add_argument("--ot-chat-period", type=float, default=1.8, help="Seconds between OT chat notes")
     parser.add_argument("--ot-llm", dest="ot_llm", action="store_true", help="Use OpenAI to generate OT note text")
     parser.add_argument("--no-ot-llm", dest="ot_llm", action="store_false", help="Disable OpenAI OT notes")
     parser.add_argument("--ot-model", type=str, default="gpt-4o-mini", help="OpenAI model for OT notes")
@@ -520,6 +541,7 @@ def main() -> None:
         ot_annotate=True,
         risk_badges=False,
         ot_llm=False,
+        ot_chat=True,
     )
     args = parser.parse_args()
 
@@ -852,6 +874,9 @@ def main() -> None:
     ot_note_expiry: int = 0
     ot_note_cache: Dict[str, str] = {}
     ot_note_error: bool = False
+    ot_chat_notes: List[str] = []
+    ot_chat_expiry: List[int] = []
+    ot_chat_idx: int = 0
     class_filter: Optional[set] = None
     if args.detect_objects:
         detector = _load_detector()
@@ -933,6 +958,7 @@ def main() -> None:
             trip_mask_accum = None
             slip_mask_accum = None
             hazard_callouts: List[Tuple[str, Tuple[int, int]]] = []
+            hazard_tags: List[str] = []
             for layer in component_layers:
                 proj, valid, depths = _project_points(layer["points"], camera, cameras)
                 if proj.size == 0:
@@ -1072,6 +1098,7 @@ def main() -> None:
                                 if idx_best is not None:
                                     u, v = pts[idx_best]
                                     hazard_callouts.append((msg, (int(u), int(v))))
+                                    hazard_tags.append(msg_label)
                         continue
                     # Hard color bands: draw separate masks by value buckets.
                     low_mask = np.zeros((height, width), dtype=np.uint8)
@@ -1245,26 +1272,29 @@ def main() -> None:
                     if label in {"rug", "hardwood floor"}:
                         # Skip visual boxes for rug/hardwood per request.
                         continue
-                    _draw_box(frame, tuple(int(v) for v in box), color, label)
+                    if not args.ot_chat:
+                        _draw_box(frame, tuple(int(v) for v in box), color, label)
                     if label == "table":
                         x1, y1, x2, y2 = [int(v) for v in box]
                         corners = [(x1, y1), (x2, y1), (x1, y2), (x2, y2)]
                         for (cx, cy) in corners:
-                            cv2.circle(frame, (cx, cy), 6, (0, 0, 255), -1)
-                            cv2.putText(
-                                frame,
-                                "corner",
-                                (cx + 6, cy - 6 if cy > 10 else cy + 14),
-                                cv2.FONT_HERSHEY_SIMPLEX,
-                                0.45,
-                                (0, 0, 255),
-                                1,
-                                cv2.LINE_AA,
-                            )
+                            if not args.ot_chat:
+                                cv2.circle(frame, (cx, cy), 6, (0, 0, 255), -1)
+                                cv2.putText(
+                                    frame,
+                                    "corner",
+                                    (cx + 6, cy - 6 if cy > 10 else cy + 14),
+                                    cv2.FONT_HERSHEY_SIMPLEX,
+                                    0.45,
+                                    (0, 0, 255),
+                                    1,
+                                    cv2.LINE_AA,
+                                )
                     msg = _ot_message_for(label)
                     if msg:
                         x1, y1, x2, y2 = [int(v) for v in box]
                         det_callouts.append((msg, (x1 + (x2 - x1) // 2, y1 + (y2 - y1) // 2)))
+                        hazard_tags.append(label)
             if args.ot_annotate:
                 period = max(1, int(args.ot_duration * video_fps))
                 if frame_idx % period == 0:
@@ -1309,6 +1339,39 @@ def main() -> None:
                 _draw_ot_callouts(frame, active, (0, 0, 0), args.ot_max)
                 if ot_note_text and frame_idx <= ot_note_expiry:
                     _draw_ot_note(frame, ot_note_text)
+            if args.ot_chat:
+                chat_period = max(1, int(args.ot_chat_period * video_fps))
+                if frame_idx % chat_period == 0:
+                    # Build clinical chat note candidates.
+                    unique = []
+                    for tag in hazard_tags:
+                        if tag in {"rug", "hardwood floor"}:
+                            continue
+                        if tag not in unique:
+                            unique.append(tag)
+                    if not unique:
+                        unique = ["obstacle"]
+                    notes_map = {
+                        "table": "OT: Low table edges in path; pad or reposition.",
+                        "trip": "OT: Trip risk noted; clear clutter in walk path.",
+                        "slip": "OT: Slip risk noted; add traction in pathway.",
+                        "obstacle": "OT: Narrow path; remove obstacles for clearance.",
+                    }
+                    tag = unique[ot_chat_idx % len(unique)]
+                    ot_chat_idx += 1
+                    note = notes_map.get(tag, "OT: Maintain clear walking path.")
+                    ot_chat_notes.append(note)
+                    ot_chat_expiry.append(frame_idx + int(6 * video_fps))
+                # Drop expired notes
+                active_notes = []
+                active_exp = []
+                for note, exp in zip(ot_chat_notes, ot_chat_expiry):
+                    if frame_idx <= exp:
+                        active_notes.append(note)
+                        active_exp.append(exp)
+                ot_chat_notes = active_notes
+                ot_chat_expiry = active_exp
+                _draw_ot_chat(frame, ot_chat_notes, args.ot_chat_max)
         if args.show_split and frame_idx < split_frames:
             split_x = width // 2
             combined = raw_frame.copy()
