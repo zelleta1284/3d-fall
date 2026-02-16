@@ -877,6 +877,7 @@ def main() -> None:
     ot_chat_notes: List[str] = []
     ot_chat_expiry: List[int] = []
     ot_chat_idx: int = 0
+    ot_recent_notes: List[str] = []
     class_filter: Optional[set] = None
     if args.detect_objects:
         detector = _load_detector()
@@ -1038,7 +1039,10 @@ def main() -> None:
                     override = semantic_color_overrides.get(name)
                     if override is not None:
                         base_color = np.array(override, dtype=np.int32)
-                    if args.callouts:
+                    if args.ot_chat:
+                        # Skip all color overlays when using OT chat mode.
+                        continue
+                    elif args.callouts:
                         # Draw small callout markers instead of large shaded regions.
                         order = np.argsort(values)[::-1]
                         if order.size > args.callout_max:
@@ -1185,7 +1189,7 @@ def main() -> None:
             if fade_frames > 0:
                 fade = min(1.0, frame_idx / float(fade_frames))
             frame = cv2.addWeighted(overlay, args.alpha * fade, frame, 1.0 - args.alpha * fade, 0)
-            if args.legend and component_layers:
+            if args.legend and component_layers and not args.ot_chat:
                 legend_items = [
                     ("Trip", component_colors["trip"]),
                     ("Slip", component_colors["slip"]),
@@ -1295,7 +1299,7 @@ def main() -> None:
                         x1, y1, x2, y2 = [int(v) for v in box]
                         det_callouts.append((msg, (x1 + (x2 - x1) // 2, y1 + (y2 - y1) // 2)))
                         hazard_tags.append(label)
-            if args.ot_annotate:
+            if args.ot_annotate and not args.ot_chat:
                 period = max(1, int(args.ot_duration * video_fps))
                 if frame_idx % period == 0:
                     ot_callouts = hazard_callouts + det_callouts
@@ -1349,17 +1353,45 @@ def main() -> None:
                             continue
                         if tag not in unique:
                             unique.append(tag)
-                    if not unique:
-                        unique = ["obstacle"]
+                    base_notes = [
+                        "OT: Maintain a clear walking path.",
+                        "OT: Improve lighting on the main walkway.",
+                        "OT: Keep frequently used items within easy reach.",
+                        "OT: Remove clutter near seating and exits.",
+                    ]
                     notes_map = {
-                        "table": "OT: Low table edges in path; pad or reposition.",
-                        "trip": "OT: Trip risk noted; clear clutter in walk path.",
-                        "slip": "OT: Slip risk noted; add traction in pathway.",
-                        "obstacle": "OT: Narrow path; remove obstacles for clearance.",
+                        "table": [
+                            "OT: Low table edges in path; pad or reposition.",
+                            "OT: Coffee table corners are a trip hazard.",
+                        ],
+                        "trip": [
+                            "OT: Trip risk noted; clear clutter in walk path.",
+                            "OT: Secure loose textiles near traffic areas.",
+                        ],
+                        "slip": [
+                            "OT: Slip risk noted; add traction in pathway.",
+                            "OT: Add non-slip pads where footing feels slick.",
+                        ],
+                        "obstacle": [
+                            "OT: Narrow path; remove obstacles for clearance.",
+                            "OT: Widen walkway to reduce collision risk.",
+                        ],
                     }
-                    tag = unique[ot_chat_idx % len(unique)]
-                    ot_chat_idx += 1
-                    note = notes_map.get(tag, "OT: Maintain clear walking path.")
+                    candidates = []
+                    for tag in unique:
+                        candidates.extend(notes_map.get(tag, []))
+                    candidates.extend(base_notes)
+                    # Choose a note not used recently.
+                    note = None
+                    for cand in candidates:
+                        if cand not in ot_recent_notes:
+                            note = cand
+                            break
+                    if note is None:
+                        ot_recent_notes = []
+                        note = candidates[0] if candidates else "OT: Maintain clear walking path."
+                    ot_recent_notes.append(note)
+                    ot_recent_notes = ot_recent_notes[-6:]
                     ot_chat_notes.append(note)
                     ot_chat_expiry.append(frame_idx + int(6 * video_fps))
                 # Drop expired notes
