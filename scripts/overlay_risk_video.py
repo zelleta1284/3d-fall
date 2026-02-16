@@ -315,6 +315,49 @@ def _draw_box(
     cv2.putText(frame, label, (x1, max(0, y1 - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2, cv2.LINE_AA)
 
 
+def _ot_message_for(label: str) -> Optional[str]:
+    label = label.lower()
+    if label in {"rug"}:
+        return "OT note: Secure or remove rug (trip hazard)."
+    if label in {"table", "dining table"}:
+        return "OT note: Low table edges in path—reposition or pad."
+    if label in {"hardwood floor"}:
+        return "OT note: Slick floor—use non-slip pads or socks with grip."
+    if label in {"obstacle"}:
+        return "OT note: Clear walking path (obstacle risk)."
+    if label in {"trip"}:
+        return "OT note: Trip risk—remove clutter and tape down edges."
+    if label in {"slip"}:
+        return "OT note: Slip risk—add traction or mats."
+    return None
+
+
+def _draw_ot_callouts(
+    frame: np.ndarray,
+    callouts: List[Tuple[str, Tuple[int, int]]],
+    color: Tuple[int, int, int],
+    max_items: int,
+) -> None:
+    if not callouts:
+        return
+    x0, y0 = 12, 30
+    box_w, box_h = 360, 26
+    shown = 0
+    for text, anchor in callouts:
+        if shown >= max_items:
+            break
+        y = y0 + shown * (box_h + 8)
+        # Background box
+        cv2.rectangle(frame, (x0, y - box_h + 2), (x0 + box_w, y + 2), color, thickness=-1)
+        cv2.putText(frame, text, (x0 + 6, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+        # Leader line to anchor point
+        ax, ay = anchor
+        ax = int(max(0, min(frame.shape[1] - 1, ax)))
+        ay = int(max(0, min(frame.shape[0] - 1, ay)))
+        cv2.line(frame, (x0 + box_w, y - 8), (ax, ay), color, 1, cv2.LINE_AA)
+        shown += 1
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Overlay the risk heatmap on the original video.")
     parser.add_argument("--video", required=True)
@@ -379,6 +422,9 @@ def main() -> None:
     parser.add_argument("--callout-max", type=int, default=120, help="Max callout points per layer")
     parser.add_argument("--callout-labels", dest="callout_labels", action="store_true", help="Draw labels for top callouts")
     parser.add_argument("--no-callout-labels", dest="callout_labels", action="store_false", help="Disable callout labels")
+    parser.add_argument("--ot-annotate", dest="ot_annotate", action="store_true", help="Add OT-style annotation callouts")
+    parser.add_argument("--no-ot-annotate", dest="ot_annotate", action="store_false", help="Disable OT-style annotations")
+    parser.add_argument("--ot-max", type=int, default=3, help="Max OT callouts per frame")
     parser.add_argument("--include-all-trip-slip", dest="include_all_trip_slip", action="store_true", help="Render all nonzero trip/slip cells")
     parser.add_argument("--no-include-all-trip-slip", dest="include_all_trip_slip", action="store_false", help="Allow quantile sampling for trip/slip")
     parser.add_argument("--no-minimap", dest="show_minimap", action="store_false", help="Disable mini-map inset")
@@ -394,6 +440,7 @@ def main() -> None:
         path_only=False,
         callouts=True,
         callout_labels=True,
+        ot_annotate=True,
     )
     args = parser.parse_args()
 
@@ -720,6 +767,7 @@ def main() -> None:
     last_depth: Optional[np.ndarray] = None
     detector = None
     last_dets: List[Dict[str, object]] = []
+    ot_callouts: List[Tuple[str, Tuple[int, int]]] = []
     class_filter: Optional[set] = None
     if args.detect_objects:
         detector = _load_detector()
@@ -1086,6 +1134,7 @@ def main() -> None:
                         hardwood_box = _hardwood_heuristic(raw_frame)
                         if hardwood_box:
                             last_dets.append({"box": hardwood_box, "label": "hardwood floor", "score": 1.0})
+                ot_callouts = []
                 for det in last_dets:
                     box = det["box"]
                     label = str(det["label"])
@@ -1102,6 +1151,12 @@ def main() -> None:
                     elif label == "hardwood floor":
                         color = (19, 69, 139)
                     _draw_box(frame, tuple(int(v) for v in box), color, label)
+                    msg = _ot_message_for(label)
+                    if msg:
+                        x1, y1, x2, y2 = [int(v) for v in box]
+                        ot_callouts.append((msg, (x1 + (x2 - x1) // 2, y1 + (y2 - y1) // 2)))
+            if args.ot_annotate and ot_callouts:
+                _draw_ot_callouts(frame, ot_callouts, (0, 0, 0), args.ot_max)
         if args.show_split and frame_idx < split_frames:
             split_x = width // 2
             combined = raw_frame.copy()
