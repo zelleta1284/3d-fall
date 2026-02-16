@@ -326,12 +326,8 @@ def _draw_box(
 
 def _ot_message_for(label: str) -> Optional[str]:
     label = label.lower()
-    if label in {"rug"}:
-        return "Rug: secure/remove."
     if label in {"table", "dining table"}:
         return "Table: pad edges/move."
-    if label in {"hardwood floor"}:
-        return "Floor: add traction."
     if label in {"obstacle"}:
         return "Clear walking path."
     if label in {"trip"}:
@@ -862,6 +858,7 @@ def main() -> None:
             risk_any_mask = None
             trip_mask_accum = None
             slip_mask_accum = None
+            hazard_callouts: List[Tuple[str, Tuple[int, int]]] = []
             for layer in component_layers:
                 proj, valid, depths = _project_points(layer["points"], camera, cameras)
                 if proj.size == 0:
@@ -991,6 +988,16 @@ def main() -> None:
                                         1,
                                         cv2.LINE_AA,
                                     )
+                        if args.ot_annotate:
+                            msg_label = label_name
+                            if label_name == "hotspot":
+                                msg_label = "trip"
+                            msg = _ot_message_for(msg_label)
+                            if msg:
+                                idx_best = order[0] if order.size else None
+                                if idx_best is not None:
+                                    u, v = pts[idx_best]
+                                    hazard_callouts.append((msg, (int(u), int(v))))
                         continue
                     # Hard color bands: draw separate masks by value buckets.
                     low_mask = np.zeros((height, width), dtype=np.uint8)
@@ -1132,25 +1139,24 @@ def main() -> None:
                     else:
                         blended = cv2.addWeighted(heat_band, args.full_floor_heat_alpha, heat_roi, 1.0 - args.full_floor_heat_alpha, 0)
                         frame[y_start:height, 0:width] = blended
-                if args.detect_objects and detector is not None:
-                    if frame_idx % max(args.detect_every, 1) == 0:
-                        last_dets = _detect_objects(
-                            detector,
-                            raw_frame,
-                            score_thresh=args.detect_score,
-                            max_dets=args.detect_max,
-                            class_filter=class_filter,
-                        )
-                        if args.detect_rug:
-                            rug_box = _rug_heuristic(raw_frame)
-                            if rug_box:
-                                last_dets.append({"box": rug_box, "label": "rug", "score": 1.0})
-                        if args.detect_hardwood:
-                            hardwood_box = _hardwood_heuristic(raw_frame)
-                            if hardwood_box:
-                                last_dets.append({"box": hardwood_box, "label": "hardwood floor", "score": 1.0})
-                ot_callouts = []
-                ot_expiry = []
+            det_callouts: List[Tuple[str, Tuple[int, int]]] = []
+            if args.detect_objects and detector is not None:
+                if frame_idx % max(args.detect_every, 1) == 0:
+                    last_dets = _detect_objects(
+                        detector,
+                        raw_frame,
+                        score_thresh=args.detect_score,
+                        max_dets=args.detect_max,
+                        class_filter=class_filter,
+                    )
+                    if args.detect_rug:
+                        rug_box = _rug_heuristic(raw_frame)
+                        if rug_box:
+                            last_dets.append({"box": rug_box, "label": "rug", "score": 1.0})
+                    if args.detect_hardwood:
+                        hardwood_box = _hardwood_heuristic(raw_frame)
+                        if hardwood_box:
+                            last_dets.append({"box": hardwood_box, "label": "hardwood floor", "score": 1.0})
                 for det in last_dets:
                     box = det["box"]
                     label = str(det["label"])
@@ -1184,9 +1190,12 @@ def main() -> None:
                     msg = _ot_message_for(label)
                     if msg:
                         x1, y1, x2, y2 = [int(v) for v in box]
-                        ot_callouts.append((msg, (x1 + (x2 - x1) // 2, y1 + (y2 - y1) // 2)))
-                        ot_expiry.append(frame_idx + int(args.ot_duration * video_fps))
-            if args.ot_annotate and ot_callouts:
+                        det_callouts.append((msg, (x1 + (x2 - x1) // 2, y1 + (y2 - y1) // 2)))
+            if args.ot_annotate:
+                period = max(1, int(args.ot_duration * video_fps))
+                if frame_idx % period == 0:
+                    ot_callouts = hazard_callouts + det_callouts
+                    ot_expiry = [frame_idx + period - 1] * len(ot_callouts)
                 active = [
                     (callout, anchor)
                     for (callout, anchor), exp in zip(ot_callouts, ot_expiry)
