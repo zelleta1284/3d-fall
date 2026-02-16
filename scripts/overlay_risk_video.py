@@ -1385,39 +1385,39 @@ def main() -> None:
                         if tag not in unique:
                             unique.append(tag)
                     base_notes = [
-                        "OT: Maintain a clear walking path.",
-                        "OT: Improve lighting on the main walkway.",
-                        "OT: Keep frequently used items within easy reach.",
-                        "OT: Remove clutter near seating and exits.",
+                        "Notes: Maintain a clear walking path.",
+                        "Notes: Improve lighting on the main walkway.",
+                        "Notes: Keep frequently used items within easy reach.",
+                        "Notes: Remove clutter near seating and exits.",
                     ]
                     if rug_detected:
-                        base_notes.append("OT: Rug present; secure edges with non-slip backing.")
+                        base_notes.append("Notes: Rug present; secure edges with non-slip backing.")
                         unique.append("rug")
                     if hardwood_detected:
-                        base_notes.append("OT: Slick flooring noted; prioritize traction.")
+                        base_notes.append("Notes: Slick flooring noted; prioritize traction.")
                         unique.append("hardwood")
                     notes_map = {
                         "table": [
-                            "OT: Low table edges in path; pad or reposition.",
-                            "OT: Coffee table corners are a trip hazard.",
+                            "Notes: Low table edges in path; pad or reposition.",
+                            "Notes: Coffee table corners are a trip hazard.",
                         ],
                         "trip": [
-                            "OT: Trip risk noted; clear clutter in walk path.",
-                            "OT: Secure loose textiles near traffic areas.",
+                            "Notes: Trip risk noted; clear clutter in walk path.",
+                            "Notes: Secure loose textiles near traffic areas.",
                         ],
                         "slip": [
-                            "OT: Slip risk noted; add traction in pathway.",
-                            "OT: Add non-slip pads where footing feels slick.",
+                            "Notes: Slip risk noted; add traction in pathway.",
+                            "Notes: Add non-slip pads where footing feels slick.",
                         ],
                         "obstacle": [
-                            "OT: Narrow path; remove obstacles for clearance.",
-                            "OT: Widen walkway to reduce collision risk.",
+                            "Notes: Narrow path; remove obstacles for clearance.",
+                            "Notes: Widen walkway to reduce collision risk.",
                         ],
                         "rug": [
-                            "OT: Rug edge lift noted; use non-slip pad or tape.",
+                            "Notes: Rug edge lift noted; use non-slip pad or tape.",
                         ],
                         "hardwood": [
-                            "OT: Polished floor; consider grip socks or runners.",
+                            "Notes: Polished floor; consider grip socks or runners.",
                         ],
                     }
                     candidates = []
@@ -1432,7 +1432,7 @@ def main() -> None:
                             break
                     if note is None:
                         ot_recent_notes = []
-                        note = candidates[0] if candidates else "OT: Maintain clear walking path."
+                        note = candidates[0] if candidates else "Notes: Maintain clear walking path."
                     ot_recent_notes.append(note)
                     ot_recent_notes = ot_recent_notes[-6:]
                     ot_chat_notes.append(note)
@@ -1452,17 +1452,17 @@ def main() -> None:
                 if frame_idx % dme_period == 0:
                     dme_candidates = []
                     if rug_detected:
-                        dme_candidates.append("DME: Non-slip rug pad; place under area rug.")
+                        dme_candidates.append("DME Suggestion: Non-slip rug pad under area rug.")
                     if hardwood_detected:
-                        dme_candidates.append("DME: Traction strips in main walking path.")
+                        dme_candidates.append("DME Suggestion: Traction strips in main walkway.")
                     if "table" in hazard_tags:
-                        dme_candidates.append("DME: Corner guards on coffee table edges.")
+                        dme_candidates.append("DME Suggestion: Corner guards on coffee table edges.")
                     if "slip" in hazard_tags:
-                        dme_candidates.append("DME: Non-slip socks or footwear.")
+                        dme_candidates.append("DME Suggestion: Non-slip socks or footwear.")
                     if "trip" in hazard_tags:
-                        dme_candidates.append("DME: Secure cords with floor cable covers.")
+                        dme_candidates.append("DME Suggestion: Cable covers for cords.")
                     if not dme_candidates:
-                        dme_candidates.append("DME: Nightlight for pathway visibility.")
+                        dme_candidates.append("DME Suggestion: Nightlight for pathway visibility.")
                     dme_note = None
                     for cand in dme_candidates:
                         if cand not in dme_recent:
