@@ -311,24 +311,33 @@ def _draw_box(
     overlay = frame.copy()
     cv2.rectangle(overlay, (x1, y1), (x2, y2), color, thickness=-1)
     cv2.addWeighted(overlay, alpha_fill, frame, 1.0 - alpha_fill, 0, dst=frame)
-    cv2.rectangle(frame, (x1, y1), (x2, y2), color, thickness=2)
+    # draw only corners to avoid full box look
+    corner = max(8, int(0.08 * min(x2 - x1, y2 - y1)))
+    cv2.line(frame, (x1, y1), (x1 + corner, y1), color, 2)
+    cv2.line(frame, (x1, y1), (x1, y1 + corner), color, 2)
+    cv2.line(frame, (x2, y1), (x2 - corner, y1), color, 2)
+    cv2.line(frame, (x2, y1), (x2, y1 + corner), color, 2)
+    cv2.line(frame, (x1, y2), (x1 + corner, y2), color, 2)
+    cv2.line(frame, (x1, y2), (x1, y2 - corner), color, 2)
+    cv2.line(frame, (x2, y2), (x2 - corner, y2), color, 2)
+    cv2.line(frame, (x2, y2), (x2, y2 - corner), color, 2)
     cv2.putText(frame, label, (x1, max(0, y1 - 6)), cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2, cv2.LINE_AA)
 
 
 def _ot_message_for(label: str) -> Optional[str]:
     label = label.lower()
     if label in {"rug"}:
-        return "OT note: Secure or remove rug (trip hazard)."
+        return "Rug: secure/remove."
     if label in {"table", "dining table"}:
-        return "OT note: Low table edges in path—reposition or pad."
+        return "Table: pad edges/move."
     if label in {"hardwood floor"}:
-        return "OT note: Slick floor—use non-slip pads or socks with grip."
+        return "Floor: add traction."
     if label in {"obstacle"}:
-        return "OT note: Clear walking path (obstacle risk)."
+        return "Clear walking path."
     if label in {"trip"}:
-        return "OT note: Trip risk—remove clutter and tape down edges."
+        return "Trip risk: clear clutter."
     if label in {"slip"}:
-        return "OT note: Slip risk—add traction or mats."
+        return "Slip risk: add grip."
     return None
 
 
@@ -341,7 +350,7 @@ def _draw_ot_callouts(
     if not callouts:
         return
     x0, y0 = 12, 30
-    box_w, box_h = 360, 26
+    box_w, box_h = 240, 22
     shown = 0
     for text, anchor in callouts:
         if shown >= max_items:
@@ -1151,6 +1160,21 @@ def main() -> None:
                     elif label == "hardwood floor":
                         color = (19, 69, 139)
                     _draw_box(frame, tuple(int(v) for v in box), color, label)
+                    if label == "table":
+                        x1, y1, x2, y2 = [int(v) for v in box]
+                        corners = [(x1, y1), (x2, y1), (x1, y2), (x2, y2)]
+                        for (cx, cy) in corners:
+                            cv2.circle(frame, (cx, cy), 6, (0, 0, 255), -1)
+                            cv2.putText(
+                                frame,
+                                "corner",
+                                (cx + 6, cy - 6 if cy > 10 else cy + 14),
+                                cv2.FONT_HERSHEY_SIMPLEX,
+                                0.45,
+                                (0, 0, 255),
+                                1,
+                                cv2.LINE_AA,
+                            )
                     msg = _ot_message_for(label)
                     if msg:
                         x1, y1, x2, y2 = [int(v) for v in box]
