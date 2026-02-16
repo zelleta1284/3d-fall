@@ -11,6 +11,9 @@ import yaml
 import torch
 import torchvision
 import torchvision.transforms.functional as TF
+import json
+import os
+import urllib.request
 
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -379,6 +382,52 @@ def _draw_ot_note(frame: np.ndarray, text: str) -> None:
     cv2.putText(frame, text, (x0 + pad, y0 - 6), font, scale, (255, 255, 255), thickness, cv2.LINE_AA)
 
 
+def _ot_llm_note(
+    hazards: List[str],
+    model: str,
+    api_key: str,
+    timeout_s: float,
+) -> Optional[str]:
+    if not hazards:
+        return None
+    prompt = (
+        "You are an occupational therapist specializing in fall prevention. "
+        "Write ONE short, clinical note (max 80 chars) about the key fall risk "
+        "based on these hazards: "
+        + ", ".join(hazards)
+        + ". Avoid mentioning rugs or hardwood explicitly. Do not use emojis."
+    )
+    payload = {
+        "model": model,
+        "input": prompt,
+        "text": {"format": {"type": "text"}},
+    }
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        "https://api.openai.com/v1/responses",
+        data=data,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+            resp_json = json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        return None
+    text = resp_json.get("output_text")
+    if isinstance(text, str) and text.strip():
+        return text.strip()
+    # fallback: parse output items
+    output = resp_json.get("output", [])
+    for item in output:
+        if item.get("type") == "output_text" and "text" in item:
+            return str(item["text"]).strip()
+    return None
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Overlay the risk heatmap on the original video.")
     parser.add_argument("--video", required=True)
@@ -447,6 +496,10 @@ def main() -> None:
     parser.add_argument("--no-ot-annotate", dest="ot_annotate", action="store_false", help="Disable OT-style annotations")
     parser.add_argument("--ot-max", type=int, default=3, help="Max OT callouts per frame")
     parser.add_argument("--ot-duration", type=float, default=1.5, help="Seconds to keep OT callouts on screen")
+    parser.add_argument("--ot-llm", dest="ot_llm", action="store_true", help="Use OpenAI to generate OT note text")
+    parser.add_argument("--no-ot-llm", dest="ot_llm", action="store_false", help="Disable OpenAI OT notes")
+    parser.add_argument("--ot-model", type=str, default="gpt-4o-mini", help="OpenAI model for OT notes")
+    parser.add_argument("--ot-timeout", type=float, default=8.0, help="OpenAI request timeout (seconds)")
     parser.add_argument("--risk-badges", dest="risk_badges", action="store_true", help="Show trip/slip badges")
     parser.add_argument("--no-risk-badges", dest="risk_badges", action="store_false", help="Hide trip/slip badges")
     parser.add_argument("--include-all-trip-slip", dest="include_all_trip_slip", action="store_true", help="Render all nonzero trip/slip cells")
@@ -466,6 +519,7 @@ def main() -> None:
         callout_labels=True,
         ot_annotate=True,
         risk_badges=False,
+        ot_llm=False,
     )
     args = parser.parse_args()
 
@@ -796,6 +850,8 @@ def main() -> None:
     ot_expiry: List[int] = []
     ot_note_text: Optional[str] = None
     ot_note_expiry: int = 0
+    ot_note_cache: Dict[str, str] = {}
+    ot_note_error: bool = False
     class_filter: Optional[set] = None
     if args.detect_objects:
         detector = _load_detector()
@@ -1216,8 +1272,34 @@ def main() -> None:
                     ot_expiry = [frame_idx + period - 1] * len(ot_callouts)
                     # Pick a short OT note to show as a subtitle.
                     note_candidates = [c[0] for c in ot_callouts]
+                    hazards = []
+                    for c in note_candidates:
+                        if "Trip risk" in c or "Trip" in c:
+                            hazards.append("trip risk")
+                        elif "Slip risk" in c or "Slip" in c:
+                            hazards.append("slip risk")
+                        elif "Table" in c:
+                            hazards.append("table edge")
+                        elif "Clear walking path" in c:
+                            hazards.append("obstacles in path")
                     if note_candidates:
-                        ot_note_text = note_candidates[frame_idx % len(note_candidates)]
+                        if args.ot_llm and not ot_note_error:
+                            key = "|".join(sorted(set(hazards))) or "general"
+                            if key in ot_note_cache:
+                                ot_note_text = ot_note_cache[key]
+                            else:
+                                api_key = os.getenv("OPENAI_API_KEY", "")
+                                if api_key:
+                                    note = _ot_llm_note(hazards, args.ot_model, api_key, args.ot_timeout)
+                                    if note:
+                                        ot_note_cache[key] = note
+                                        ot_note_text = note
+                                    else:
+                                        ot_note_error = True
+                                else:
+                                    ot_note_error = True
+                        if not ot_note_text:
+                            ot_note_text = note_candidates[frame_idx % len(note_candidates)]
                         ot_note_expiry = frame_idx + period - 1
                 active = [
                     (callout, anchor)
