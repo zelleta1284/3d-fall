@@ -363,6 +363,22 @@ def _draw_ot_callouts(
         shown += 1
 
 
+def _draw_ot_note(frame: np.ndarray, text: str) -> None:
+    if not text:
+        return
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    scale = 0.55
+    thickness = 1
+    (tw, th), _ = cv2.getTextSize(text, font, scale, thickness)
+    pad = 10
+    x0 = 12
+    y0 = frame.shape[0] - 18
+    box_w = min(frame.shape[1] - 24, tw + pad * 2)
+    box_h = th + pad
+    cv2.rectangle(frame, (x0, y0 - box_h), (x0 + box_w, y0), (0, 0, 0), thickness=-1)
+    cv2.putText(frame, text, (x0 + pad, y0 - 6), font, scale, (255, 255, 255), thickness, cv2.LINE_AA)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Overlay the risk heatmap on the original video.")
     parser.add_argument("--video", required=True)
@@ -778,6 +794,8 @@ def main() -> None:
     last_dets: List[Dict[str, object]] = []
     ot_callouts: List[Tuple[str, Tuple[int, int]]] = []
     ot_expiry: List[int] = []
+    ot_note_text: Optional[str] = None
+    ot_note_expiry: int = 0
     class_filter: Optional[set] = None
     if args.detect_objects:
         detector = _load_detector()
@@ -1196,12 +1214,19 @@ def main() -> None:
                 if frame_idx % period == 0:
                     ot_callouts = hazard_callouts + det_callouts
                     ot_expiry = [frame_idx + period - 1] * len(ot_callouts)
+                    # Pick a short OT note to show as a subtitle.
+                    note_candidates = [c[0] for c in ot_callouts]
+                    if note_candidates:
+                        ot_note_text = note_candidates[frame_idx % len(note_candidates)]
+                        ot_note_expiry = frame_idx + period - 1
                 active = [
                     (callout, anchor)
                     for (callout, anchor), exp in zip(ot_callouts, ot_expiry)
                     if frame_idx <= exp
                 ]
                 _draw_ot_callouts(frame, active, (0, 0, 0), args.ot_max)
+                if ot_note_text and frame_idx <= ot_note_expiry:
+                    _draw_ot_note(frame, ot_note_text)
         if args.show_split and frame_idx < split_frames:
             split_x = width // 2
             combined = raw_frame.copy()
