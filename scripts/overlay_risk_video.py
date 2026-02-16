@@ -382,6 +382,60 @@ def _draw_ot_note(frame: np.ndarray, text: str) -> None:
     cv2.putText(frame, text, (x0 + pad, y0 - 6), font, scale, (255, 255, 255), thickness, cv2.LINE_AA)
 
 
+def _load_room_context(workdir: Path) -> str:
+    risk_summary = {}
+    room_interp = {}
+    patient = {}
+    room_output = {}
+    try:
+        rs_path = workdir / "risk" / "risk_summary.json"
+        if rs_path.exists():
+            risk_summary = yaml.safe_load(rs_path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        risk_summary = {}
+    try:
+        ri_path = workdir / "risk" / "room_interpretation.json"
+        if ri_path.exists():
+            room_interp = yaml.safe_load(ri_path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        room_interp = {}
+    try:
+        pi_path = workdir / "risk" / "patient_inference.json"
+        if pi_path.exists():
+            patient = yaml.safe_load(pi_path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        patient = {}
+    try:
+        ro_path = workdir / "room_output.json"
+        if ro_path.exists():
+            room_output = json.loads(ro_path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        room_output = {}
+    context = {
+        "room_interpretation": room_interp,
+        "risk_summary": risk_summary,
+        "patient": patient.get("patient", patient),
+        "room_name": patient.get("room_name"),
+    }
+    if room_output:
+        room_output_subset = {}
+        for key in (
+            "room_name",
+            "risk_summary",
+            "room_interpretation",
+            "mitigations",
+            "explanation_text",
+            "patient_input",
+            "patient_inferences",
+        ):
+            if key in room_output:
+                room_output_subset[key] = room_output[key]
+        context["room_output"] = room_output_subset
+    context_str = json.dumps(context, ensure_ascii=True)
+    # Keep prompt size reasonable.
+    return context_str[:1600]
+
+
 def _draw_ot_chat(frame: np.ndarray, notes: List[str], max_items: int) -> None:
     if not notes:
         return
@@ -420,6 +474,7 @@ def _draw_dme_strip(frame: np.ndarray, notes: List[str], max_items: int) -> None
 
 def _ot_llm_note(
     hazards: List[str],
+    context_json: str,
     model: str,
     api_key: str,
     timeout_s: float,
@@ -428,10 +483,14 @@ def _ot_llm_note(
         return None
     prompt = (
         "You are an occupational therapist specializing in fall prevention. "
-        "Write ONE short, clinical note (max 80 chars) about the key fall risk "
+        "Write ONE short, clinical note (max 90 chars) about the key fall risk "
         "based on these hazards: "
         + ", ".join(hazards)
-        + ". Avoid mentioning rugs or hardwood explicitly. Do not use emojis."
+        + ". Use the room context + room_output JSON below when relevant. "
+        "If the JSON mentions a dominant factor or mitigation, reference it. "
+        "Do not use emojis.\n"
+        + "Room context + output JSON:\n"
+        + context_json
     )
     payload = {
         "model": model,
@@ -1355,7 +1414,8 @@ def main() -> None:
                             else:
                                 api_key = os.getenv("OPENAI_API_KEY", "")
                                 if api_key:
-                                    note = _ot_llm_note(hazards, args.ot_model, api_key, args.ot_timeout)
+                                    context_json = _load_room_context(workdir)
+                                    note = _ot_llm_note(hazards, context_json, args.ot_model, api_key, args.ot_timeout)
                                     if note:
                                         ot_note_cache[key] = note
                                         ot_note_text = note
