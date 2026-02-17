@@ -1,0 +1,10 @@
+{
+  "frames_processed": 1,
+  "labels_detected": {
+    "sink": 4,
+    "toilet": 1,
+    "refrigerator": 1
+  },
+  "rug_like_points": 0,
+  "room_name": "living_room"
+}

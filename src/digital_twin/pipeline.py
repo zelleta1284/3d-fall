@@ -87,18 +87,52 @@ def run_colmap(frames_dir: Path, colmap_dir: Path, single_camera: bool = True) -
         ]
     )
     _run(["colmap", "exhaustive_matcher", "--database_path", str(database)])
-    _run(
-        [
-            "colmap",
-            "mapper",
-            "--database_path",
-            str(database),
-            "--image_path",
-            str(images),
-            "--output_path",
-            str(sparse),
-        ]
-    )
+    try:
+        _run(
+            [
+                "colmap",
+                "mapper",
+                "--database_path",
+                str(database),
+                "--image_path",
+                str(images),
+                "--output_path",
+                str(sparse),
+            ]
+        )
+    except subprocess.CalledProcessError:
+        # Retry with sequential matching and relaxed mapper thresholds for low-texture scenes.
+        _run(
+            [
+                "colmap",
+                "sequential_matcher",
+                "--database_path",
+                str(database),
+                "--SequentialMatching.overlap",
+                "10",
+            ]
+        )
+        if sparse.exists():
+            shutil.rmtree(sparse)
+        ensure_dir(sparse)
+        _run(
+            [
+                "colmap",
+                "mapper",
+                "--database_path",
+                str(database),
+                "--image_path",
+                str(images),
+                "--output_path",
+                str(sparse),
+                "--Mapper.init_min_tri_angle",
+                "1",
+                "--Mapper.min_num_matches",
+                "8",
+                "--Mapper.abs_pose_min_num_inliers",
+                "15",
+            ]
+        )
 
     # Convert to TXT for easier parsing
     sparse_txt = colmap_dir / "sparse_txt"

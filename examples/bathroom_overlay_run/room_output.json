@@ -1,0 +1,260 @@
+{
+  "patient_input": {
+    "age": 78,
+    "gender": "female",
+    "fall_last_6_months": true,
+    "fall_hospitalized": false,
+    "can_get_out_of_bed": true,
+    "assistive_aid": true,
+    "room_name": "bathroom"
+  },
+  "patient_inferences": {
+    "patient": {
+      "age": 78,
+      "gender": "female",
+      "fall_last_6_months": true,
+      "fall_hospitalized": false,
+      "can_get_out_of_bed": true,
+      "assistive_aid": true,
+      "room_name": "bathroom"
+    },
+    "patient_effects": {
+      "adjustments": [
+        {
+          "field": "gait.speed_mps",
+          "from": 0.65,
+          "to": 0.5850000000000001,
+          "reason": "age>=70"
+        },
+        {
+          "field": "biomechanics.reaction_time_s",
+          "from": 0.7,
+          "to": 0.77,
+          "reason": "age>=70"
+        },
+        {
+          "field": "risk.weights.obstacle",
+          "from": 1.54,
+          "to": 1.6940000000000002,
+          "reason": "fall_last_6_months"
+        },
+        {
+          "field": "risk.weights.slip",
+          "from": 1.2,
+          "to": 1.32,
+          "reason": "fall_last_6_months"
+        },
+        {
+          "field": "risk.weights.trip",
+          "from": 1.56,
+          "to": 1.7160000000000002,
+          "reason": "fall_last_6_months"
+        },
+        {
+          "field": "biomechanics.cane",
+          "from": 0.0,
+          "to": 1.0,
+          "reason": "assistive_aid"
+        },
+        {
+          "field": "gait.speed_mps",
+          "from": 0.5850000000000001,
+          "to": 0.5265000000000001,
+          "reason": "assistive_aid"
+        },
+        {
+          "field": "gait.lateral_std",
+          "from": 0.07,
+          "to": 0.06300000000000001,
+          "reason": "assistive_aid"
+        }
+      ],
+      "notes": [
+        "gender recorded; no model adjustment applied"
+      ]
+    },
+    "room_name": "living_room",
+    "room_effects": {
+      "room_profile": "living_room",
+      "adjustments": [
+        {
+          "field": "risk.weights.trip",
+          "from": 1.3,
+          "to": 1.56,
+          "reason": "room=living_room"
+        },
+        {
+          "field": "risk.weights.obstacle",
+          "from": 1.4,
+          "to": 1.54,
+          "reason": "room=living_room"
+        },
+        {
+          "field": "risk.weights.glare",
+          "from": 0.6,
+          "to": 0.66,
+          "reason": "room=living_room"
+        },
+        {
+          "field": "risk.semantic_weight",
+          "from": 1.0,
+          "to": 1.2,
+          "reason": "room=living_room"
+        }
+      ]
+    }
+  },
+  "room_name": "bathroom",
+  "room_interpretation": {
+    "room_name": "living_room",
+    "floor_z_estimate_m": 0.9137004133739048,
+    "ceiling_z_estimate_m": 3.59358790014491,
+    "height_span_m": 2.679887486771005,
+    "floor_material": null,
+    "floor_material_confidence": null,
+    "floor_material_applied": null,
+    "floor_glare_ratio": null,
+    "floor_glare_applied": null,
+    "default_friction": 0.45,
+    "grid_size_m": 0.03,
+    "obstacle_height_threshold_m": 0.08,
+    "obstacle_cells": 268,
+    "obstacle_ratio": 0.7613636363636364,
+    "friction_zones": 3,
+    "lighting_windows": 6,
+    "lighting_lights": 1,
+    "room_profile_applied": "living_room"
+  },
+  "risk_summary": {
+    "overall_risk_score": 0.3622075617313385,
+    "p95": 3.471436023712158,
+    "p99": 4.403068542480469,
+    "hotspots": [
+      {
+        "position": [
+          -0.20133190050197225,
+          0.3786030388791939
+        ],
+        "score": 5.134124755859375
+      },
+      {
+        "position": [
+          -0.051331900501972255,
+          0.07860303887919387
+        ],
+        "score": 5.000809192657471
+      },
+      {
+        "position": [
+          -0.08133190050197225,
+          0.07860303887919387
+        ],
+        "score": 4.9987077713012695
+      },
+      {
+        "position": [
+          -0.08133190050197225,
+          0.04860303887919387
+        ],
+        "score": 4.996921539306641
+      },
+      {
+        "position": [
+          -0.051331900501972255,
+          0.04860303887919387
+        ],
+        "score": 3.8325037956237793
+      }
+    ],
+    "coverage": {
+      "above_p95": 0.05113636363636364,
+      "above_p99": 0.011363636363636364
+    },
+    "components": {
+      "obstacle": {
+        "mean": 0.7439210414886475,
+        "p95": 2.2160584926605225,
+        "sum": 261.8601989746094,
+        "share": 0.46645942831744985
+      },
+      "turn": {
+        "mean": 0.0,
+        "p95": 0.0,
+        "sum": 0.0,
+        "share": 0.0
+      },
+      "trip": {
+        "mean": 0.6842891573905945,
+        "p95": 2.788928985595703,
+        "sum": 240.86978149414062,
+        "share": 0.42906856794071335
+      },
+      "slip": {
+        "mean": 0.10781487822532654,
+        "p95": 0.08806250244379044,
+        "sum": 37.950836181640625,
+        "share": 0.06760296302674756
+      },
+      "glare": {
+        "mean": 0.058799609541893005,
+        "p95": 0.07123526930809021,
+        "sum": 20.69746208190918,
+        "share": 0.03686901013653312
+      },
+      "physics": {
+        "mean": 0.0,
+        "p95": 0.0,
+        "sum": 0.0,
+        "share": 0.0
+      }
+    },
+    "dominant_factors": [
+      {
+        "factor": "obstacle",
+        "share": 0.46645942831744985
+      },
+      {
+        "factor": "trip",
+        "share": 0.42906856794071335
+      },
+      {
+        "factor": "slip",
+        "share": 0.06760296302674756
+      }
+    ],
+    "context_text": "Dominant hazards: obstacle (46% of total), trip (42% of total), slip (6% of total). Top hotspot near (-0.20, 0.38). 5.1% of the floor exceeds the 95th percentile risk and 1.1% exceeds the 99th percentile.",
+    "narrative": "Overall risk in this room is moderate (score 0.36). Risk is concentrated in small areas: top 5% of floor cells have risk >= 3.47, top 1% >= 4.40. Approximately 5.1% of cells exceed p95 and 1.1% exceed p99. Dominant contributors: obstacle (46%), trip (42%), slip (6%).",
+    "explanation_text": "How to read this: overall_risk_score compares the average floor risk to the worst hotspots (0 = very low overall, 1 = average as risky as the worst spot). p95 and p99 are thresholds for the highest-risk 5% and 1% of floor cells. coverage.above_p95/above_p99 tell what share of the room falls into those high-risk bands. components break total risk into causes (obstacle, trip, slip, turn, glare, physics). dominant_factors lists the top contributors, and hotspots are the specific coordinates of highest risk. Semantic hazards (if enabled) inject object-detection cues into the obstacle/trip/turn components."
+  },
+  "explanation_text": "How to read this: overall_risk_score compares the average floor risk to the worst hotspots (0 = very low overall, 1 = average as risky as the worst spot). p95 and p99 are thresholds for the highest-risk 5% and 1% of floor cells. coverage.above_p95/above_p99 tell what share of the room falls into those high-risk bands. components break total risk into causes (obstacle, trip, slip, turn, glare, physics). dominant_factors lists the top contributors, and hotspots are the specific coordinates of highest risk. Semantic hazards (if enabled) inject object-detection cues into the obstacle/trip/turn components.",
+  "mitigations": [
+    {
+      "item": "Grab bars (toilet + shower)",
+      "reason": "Bathroom is a high-risk slip area."
+    },
+    {
+      "item": "Non-slip shower mat",
+      "reason": "Reduces slip risk on wet surfaces."
+    },
+    {
+      "item": "Raised toilet seat",
+      "reason": "Improves transfer stability."
+    },
+    {
+      "item": "Shower chair",
+      "reason": "Supports balance during bathing."
+    }
+  ],
+  "outputs": {
+    "mesh_ply": "<workdir>/mesh_scaled_auto.ply",
+    "mesh_preview_mp4": "<workdir>/mesh_preview.mp4",
+    "heatmap_png": "<workdir>/risk/risk_heatmap.png",
+    "heatmap_npy": "<workdir>/risk/risk_heatmap.npy",
+    "room_interpretation_json": "<workdir>/risk/room_interpretation.json",
+    "patient_inference_json": "<workdir>/risk/patient_inference.json",
+    "risk_summary_json": "<workdir>/risk/risk_summary.json",
+    "report_json": "<workdir>/report/report.json",
+    "semantic_hazards_npz": "<workdir>/semantic_hazards.npz",
+    "semantic_hazards_json": "<workdir>/semantic_hazards.json"
+  }
+}
