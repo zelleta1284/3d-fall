@@ -382,11 +382,11 @@ def _draw_ot_note(frame: np.ndarray, text: str) -> None:
     cv2.putText(frame, text, (x0 + pad, y0 - 6), font, scale, (255, 255, 255), thickness, cv2.LINE_AA)
 
 
-def _load_room_context(workdir: Path) -> str:
+def _load_room_context_dict(workdir: Path) -> Dict[str, object]:
     risk_summary = {}
     room_interp = {}
     patient = {}
-    room_output = {}
+    room_output: Dict[str, object] = {}
     try:
         rs_path = workdir / "risk" / "risk_summary.json"
         if rs_path.exists():
@@ -411,7 +411,7 @@ def _load_room_context(workdir: Path) -> str:
             room_output = json.loads(ro_path.read_text(encoding="utf-8")) or {}
     except Exception:
         room_output = {}
-    context = {
+    context: Dict[str, object] = {
         "room_interpretation": room_interp,
         "risk_summary": risk_summary,
         "patient": patient.get("patient", patient),
@@ -431,9 +431,165 @@ def _load_room_context(workdir: Path) -> str:
             if key in room_output:
                 room_output_subset[key] = room_output[key]
         context["room_output"] = room_output_subset
+    return context
+
+
+def _load_room_context(workdir: Path) -> str:
+    context = _load_room_context_dict(workdir)
     context_str = json.dumps(context, ensure_ascii=True)
     # Keep prompt size reasonable.
     return context_str[:1600]
+
+
+def _format_percent(value: Optional[float], max_value: float = 1.0) -> Optional[str]:
+    if value is None:
+        return None
+    try:
+        if max_value == 0:
+            return None
+        pct = max(0.0, min(1.0, float(value) / max_value)) * 100.0
+    except Exception:
+        return None
+    return f"{pct:.0f}%"
+
+
+def _humanize_factor_name(factor: str) -> str:
+    name = factor.replace("_", " ").strip().lower()
+    mapping = {
+        "trip": "trip",
+        "slip": "slip",
+        "obstacle": "obstacle",
+        "turn": "turning",
+        "glare": "glare",
+        "physics": "balance",
+    }
+    return mapping.get(name, name or "risk")
+
+
+def _build_human_notes(
+    context: Dict[str, object],
+    hazard_tags: List[str],
+    rug_detected: bool,
+    hardwood_detected: bool,
+) -> List[str]:
+    notes: List[str] = []
+    room_output = context.get("room_output") if isinstance(context.get("room_output"), dict) else {}
+    risk_summary = context.get("risk_summary") if isinstance(context.get("risk_summary"), dict) else {}
+    room_interp = context.get("room_interpretation") if isinstance(context.get("room_interpretation"), dict) else {}
+    patient_input = {}
+    if isinstance(room_output, dict):
+        patient_input = room_output.get("patient_input", {}) if isinstance(room_output.get("patient_input"), dict) else {}
+
+    dominant = risk_summary.get("dominant_factors", [])
+    if isinstance(dominant, list) and dominant:
+        top = []
+        for item in dominant[:3]:
+            if not isinstance(item, dict):
+                continue
+            factor = _humanize_factor_name(str(item.get("factor", "")))
+            share = item.get("share")
+            pct = _format_percent(share)
+            if factor and pct:
+                top.append(f"{factor} ({pct})")
+            elif factor:
+                top.append(factor)
+        if top:
+            notes.append(f"Notes: Top risks: {', '.join(top)}.")
+
+    components = risk_summary.get("components", {})
+    if isinstance(components, dict):
+        trip_share = components.get("trip", {}).get("share") if isinstance(components.get("trip"), dict) else None
+        obstacle_share = components.get("obstacle", {}).get("share") if isinstance(components.get("obstacle"), dict) else None
+        slip_share = components.get("slip", {}).get("share") if isinstance(components.get("slip"), dict) else None
+        if trip_share and trip_share > 0.3:
+            notes.append("Notes: Trip risk dominates; keep walk paths clear.")
+        if obstacle_share and obstacle_share > 0.25:
+            notes.append("Notes: Obstacle risk high; increase clearances.")
+        if slip_share and slip_share > 0.15:
+            notes.append("Notes: Slip risk elevated; add traction where needed.")
+
+    coverage = risk_summary.get("coverage", {})
+    if isinstance(coverage, dict):
+        above_p95 = coverage.get("above_p95")
+        above_p99 = coverage.get("above_p99")
+        pct95 = _format_percent(above_p95)
+        pct99 = _format_percent(above_p99)
+        if pct95:
+            if pct99:
+                notes.append(f"Notes: Highest-risk zones cover ~{pct95} of floor (top {pct99}).")
+            else:
+                notes.append(f"Notes: Highest-risk zones cover ~{pct95} of floor.")
+
+    hotspots = risk_summary.get("hotspots", [])
+    if isinstance(hotspots, list) and len(hotspots) >= 3:
+        notes.append("Notes: Multiple hotspots detected along the main path.")
+
+    obstacle_ratio = room_interp.get("obstacle_ratio")
+    if isinstance(obstacle_ratio, (int, float)) and obstacle_ratio >= 0.15:
+        notes.append("Notes: Clutter reduces clear walking space.")
+
+    if rug_detected:
+        notes.append("Notes: Rug edge is a trip risk; secure or remove.")
+    if hardwood_detected:
+        notes.append("Notes: Slick flooring noted; improve traction.")
+
+    if patient_input.get("assistive_aid") is True:
+        notes.append("Notes: Assistive aid use needs wider turning clearance.")
+    if patient_input.get("fall_last_6_months") is True:
+        notes.append("Notes: Recent fall history raises overall risk.")
+
+    # Add a few base reminders if we still need variety.
+    notes.extend(
+        [
+            "Notes: Maintain clear access to seating and exits.",
+            "Notes: Improve lighting in primary walkways.",
+            "Notes: Keep daily-use items within easy reach.",
+        ]
+    )
+    return notes
+
+
+def _build_dme_notes(
+    context: Dict[str, object],
+    hazard_tags: List[str],
+    rug_detected: bool,
+    hardwood_detected: bool,
+) -> List[str]:
+    suggestions: List[str] = []
+    room_output = context.get("room_output") if isinstance(context.get("room_output"), dict) else {}
+    mitigations = []
+    if isinstance(room_output, dict):
+        mitigations = room_output.get("mitigations", [])
+    if isinstance(mitigations, list):
+        for item in mitigations:
+            if not isinstance(item, dict):
+                continue
+            text = str(item.get("item", "")).strip()
+            if text:
+                suggestions.append(f"DME Suggestion: {text}.")
+
+    # Heuristic additions to ensure variety.
+    if rug_detected:
+        suggestions.append("DME Suggestion: Non-slip rug pad under area rug.")
+    if hardwood_detected:
+        suggestions.append("DME Suggestion: Traction strips in main walkway.")
+    if "table" in hazard_tags:
+        suggestions.append("DME Suggestion: Corner guards on table edges.")
+    if "slip" in hazard_tags:
+        suggestions.append("DME Suggestion: Non-slip socks or footwear.")
+    if "trip" in hazard_tags:
+        suggestions.append("DME Suggestion: Cable covers for cords.")
+    if not suggestions:
+        suggestions.append("DME Suggestion: Nightlight for pathway visibility.")
+    # De-dup while preserving order.
+    seen = set()
+    unique = []
+    for s in suggestions:
+        if s in seen:
+            continue
+        seen.add(s)
+        unique.append(s)
+    return unique
 
 
 def _draw_ot_chat(frame: np.ndarray, notes: List[str], max_items: int) -> None:
@@ -927,6 +1083,8 @@ def main() -> None:
     available_frames = sorted(images.keys())
     if not available_frames:
         raise RuntimeError("No images in colmap output.")
+
+    context_data = _load_room_context_dict(workdir)
 
     cap = cv2.VideoCapture(str(args.video))
     if not cap.isOpened():
@@ -1444,46 +1602,7 @@ def main() -> None:
                             continue
                         if tag not in unique:
                             unique.append(tag)
-                    base_notes = [
-                        "Notes: Maintain a clear walking path.",
-                        "Notes: Improve lighting on the main walkway.",
-                        "Notes: Keep frequently used items within easy reach.",
-                        "Notes: Remove clutter near seating and exits.",
-                    ]
-                    if rug_detected:
-                        base_notes.append("Notes: Rug present; secure edges with non-slip backing.")
-                        unique.append("rug")
-                    if hardwood_detected:
-                        base_notes.append("Notes: Slick flooring noted; prioritize traction.")
-                        unique.append("hardwood")
-                    notes_map = {
-                        "table": [
-                            "Notes: Low table edges in path; pad or reposition.",
-                            "Notes: Coffee table corners are a trip hazard.",
-                        ],
-                        "trip": [
-                            "Notes: Trip risk noted; clear clutter in walk path.",
-                            "Notes: Secure loose textiles near traffic areas.",
-                        ],
-                        "slip": [
-                            "Notes: Slip risk noted; add traction in pathway.",
-                            "Notes: Add non-slip pads where footing feels slick.",
-                        ],
-                        "obstacle": [
-                            "Notes: Narrow path; remove obstacles for clearance.",
-                            "Notes: Widen walkway to reduce collision risk.",
-                        ],
-                        "rug": [
-                            "Notes: Rug edge lift noted; use non-slip pad or tape.",
-                        ],
-                        "hardwood": [
-                            "Notes: Polished floor; consider grip socks or runners.",
-                        ],
-                    }
-                    candidates = []
-                    for tag in unique:
-                        candidates.extend(notes_map.get(tag, []))
-                    candidates.extend(base_notes)
+                    candidates = _build_human_notes(context_data, hazard_tags, rug_detected, hardwood_detected)
                     # Choose a note not used recently.
                     note = None
                     for cand in candidates:
@@ -1510,19 +1629,7 @@ def main() -> None:
             if args.dme_notes:
                 dme_period = max(1, int(args.dme_period * video_fps))
                 if frame_idx % dme_period == 0:
-                    dme_candidates = []
-                    if rug_detected:
-                        dme_candidates.append("DME Suggestion: Non-slip rug pad under area rug.")
-                    if hardwood_detected:
-                        dme_candidates.append("DME Suggestion: Traction strips in main walkway.")
-                    if "table" in hazard_tags:
-                        dme_candidates.append("DME Suggestion: Corner guards on coffee table edges.")
-                    if "slip" in hazard_tags:
-                        dme_candidates.append("DME Suggestion: Non-slip socks or footwear.")
-                    if "trip" in hazard_tags:
-                        dme_candidates.append("DME Suggestion: Cable covers for cords.")
-                    if not dme_candidates:
-                        dme_candidates.append("DME Suggestion: Nightlight for pathway visibility.")
+                    dme_candidates = _build_dme_notes(context_data, hazard_tags, rug_detected, hardwood_detected)
                     dme_note = None
                     for cand in dme_candidates:
                         if cand not in dme_recent:
