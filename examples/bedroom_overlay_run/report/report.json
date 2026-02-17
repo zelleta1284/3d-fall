@@ -1,0 +1,288 @@
+{
+  "metadata": {
+    "grid_size_m": 0.03,
+    "min_xy": [
+      -0.9967143881982765,
+      0.324880516547803
+    ],
+    "paths": [
+      {
+        "start": [
+          0.3,
+          0.1
+        ],
+        "goal": [
+          2.6,
+          1.8
+        ],
+        "count": 2400
+      },
+      {
+        "start": [
+          0.2,
+          1.6
+        ],
+        "goal": [
+          3.3,
+          0.4
+        ],
+        "count": 1600
+      }
+    ],
+    "biomechanics": {
+      "foot_clearance_m": 0.04,
+      "cane": true,
+      "shuffle_bias": 0.35,
+      "reaction_time_s": 0.7
+    },
+    "lighting": {
+      "latitude": 37.7749,
+      "longitude": -122.4194,
+      "timezone_offset_hours": -8,
+      "datetime_iso": "2026-02-11T16:00:00",
+      "glare_weight": 1.0,
+      "ambient_weight": 0.3,
+      "windows": [
+        {
+          "center": [
+            -0.7623996787623768,
+            0.5147699876384176,
+            3.5716114985751948
+          ],
+          "normal": [
+            0.6102247834205627,
+            0.758573055267334,
+            -0.2284570336341858
+          ],
+          "width": 0.7563775115804022,
+          "height": 1.1390609448814866,
+          "transmittance": 0.7
+        },
+        {
+          "center": [
+            -0.7778051639747134,
+            0.4863076833504605,
+            3.6083453629483575
+          ],
+          "normal": [
+            0.6226935982704163,
+            0.7472490072250366,
+            -0.23210261762142181
+          ],
+          "width": 0.6299531452434813,
+          "height": 1.0801633146896368,
+          "transmittance": 0.7
+        }
+      ],
+      "lights": [
+        {
+          "position": [
+            1.0,
+            1.0,
+            2.2
+          ],
+          "intensity": 1.0,
+          "range_m": 3.0
+        }
+      ]
+    },
+    "physics": {
+      "enabled": true,
+      "timestep": 0.02,
+      "steps_per_point": 5,
+      "body_radius": 0.2,
+      "body_height": 1.2,
+      "mass_kg": 70.0,
+      "floor_friction": 0.6,
+      "use_gui": false
+    },
+    "patient": {
+      "age": 78,
+      "gender": "female",
+      "fall_last_6_months": true,
+      "fall_hospitalized": false,
+      "can_get_out_of_bed": true,
+      "assistive_aid": true,
+      "room_name": "bedroom"
+    },
+    "scale_result": {
+      "scale": 0.09320265956873625,
+      "method": "prior_fit",
+      "score": 40.9,
+      "height_span": 10.911999155898654,
+      "scaled_height": 1.0170273425415595,
+      "matched_priors": [
+        "bed",
+        "sofa_seat",
+        "chair_seat",
+        "toilet_seat",
+        "coffee_table",
+        "tub_rim",
+        "table",
+        "counter",
+        "window_sill"
+      ]
+    },
+    "room_interpretation": {
+      "room": {
+        "room_name": "living_room",
+        "floor_z_estimate_m": 3.0088462141500036,
+        "ceiling_z_estimate_m": 4.025873556691563,
+        "height_span_m": 1.0170273425415592,
+        "floor_material": null,
+        "floor_material_confidence": null,
+        "floor_material_applied": null,
+        "floor_glare_ratio": null,
+        "floor_glare_applied": null,
+        "default_friction": 0.45,
+        "grid_size_m": 0.03,
+        "obstacle_height_threshold_m": 0.08,
+        "obstacle_cells": 245,
+        "obstacle_ratio": 0.8596491228070176,
+        "friction_zones": 3,
+        "lighting_windows": 2,
+        "lighting_lights": 1,
+        "room_profile_applied": "living_room"
+      },
+      "patient": {
+        "age": 78,
+        "gender": "female",
+        "fall_last_6_months": true,
+        "fall_hospitalized": false,
+        "can_get_out_of_bed": true,
+        "assistive_aid": true,
+        "room_name": "bedroom"
+      },
+      "patient_effects": {
+        "adjustments": [
+          {
+            "field": "gait.speed_mps",
+            "from": 0.65,
+            "to": 0.5850000000000001,
+            "reason": "age>=70"
+          },
+          {
+            "field": "biomechanics.reaction_time_s",
+            "from": 0.7,
+            "to": 0.77,
+            "reason": "age>=70"
+          },
+          {
+            "field": "risk.weights.obstacle",
+            "from": 1.54,
+            "to": 1.6940000000000002,
+            "reason": "fall_last_6_months"
+          },
+          {
+            "field": "risk.weights.slip",
+            "from": 1.2,
+            "to": 1.32,
+            "reason": "fall_last_6_months"
+          },
+          {
+            "field": "risk.weights.trip",
+            "from": 1.56,
+            "to": 1.7160000000000002,
+            "reason": "fall_last_6_months"
+          },
+          {
+            "field": "biomechanics.cane",
+            "from": 0.0,
+            "to": 1.0,
+            "reason": "assistive_aid"
+          },
+          {
+            "field": "gait.speed_mps",
+            "from": 0.5850000000000001,
+            "to": 0.5265000000000001,
+            "reason": "assistive_aid"
+          },
+          {
+            "field": "gait.lateral_std",
+            "from": 0.07,
+            "to": 0.06300000000000001,
+            "reason": "assistive_aid"
+          }
+        ],
+        "notes": [
+          "gender recorded; no model adjustment applied"
+        ]
+      },
+      "room_effects": {
+        "room_profile": "living_room",
+        "adjustments": [
+          {
+            "field": "risk.weights.trip",
+            "from": 1.3,
+            "to": 1.56,
+            "reason": "room=living_room"
+          },
+          {
+            "field": "risk.weights.obstacle",
+            "from": 1.4,
+            "to": 1.54,
+            "reason": "room=living_room"
+          },
+          {
+            "field": "risk.weights.glare",
+            "from": 0.6,
+            "to": 0.66,
+            "reason": "room=living_room"
+          },
+          {
+            "field": "risk.semantic_weight",
+            "from": 1.0,
+            "to": 1.2,
+            "reason": "room=living_room"
+          }
+        ]
+      },
+      "notes": [
+        "Floor/ceiling estimated from z-percentiles of mesh vertices.",
+        "Obstacles defined as heights above floor_z + obstacle_height_threshold_m.",
+        "Risk integrates obstacle proximity, turn curvature, slip (friction), trip (clearance), and glare.",
+        "Coverage mode may add risk across the entire grid in addition to simulated paths.",
+        "Semantic hazards (if enabled) inject object-detection cues into obstacle/trip/turn maps.",
+        "Patient intake may adjust parameters; see patient_effects.adjustments.",
+        "Room profiles adjust baseline hazard weights based on room type."
+      ]
+    }
+  },
+  "hotspots": [
+    {
+      "position": [
+        -0.6067143881982765,
+        0.47488051654780294
+      ],
+      "score": 7.2236552238464355
+    },
+    {
+      "position": [
+        -0.6067143881982765,
+        0.504880516547803
+      ],
+      "score": 6.988083362579346
+    },
+    {
+      "position": [
+        -0.6067143881982765,
+        0.564880516547803
+      ],
+      "score": 5.448617935180664
+    },
+    {
+      "position": [
+        -0.5767143881982766,
+        0.504880516547803
+      ],
+      "score": 5.400179386138916
+    },
+    {
+      "position": [
+        -0.6367143881982765,
+        0.444880516547803
+      ],
+      "score": 5.391453742980957
+    }
+  ]
+}

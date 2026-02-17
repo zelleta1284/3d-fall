@@ -1,0 +1,9 @@
+{
+  "frames_processed": 10,
+  "labels_detected": {
+    "bed": 9,
+    "clock": 2
+  },
+  "rug_like_points": 0,
+  "room_name": "living_room"
+}
