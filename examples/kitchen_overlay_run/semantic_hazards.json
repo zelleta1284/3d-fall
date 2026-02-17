@@ -1,0 +1,19 @@
+{
+  "frames_processed": 2,
+  "labels_detected": {
+    "chair": 10,
+    "orange": 12,
+    "sink": 3,
+    "bowl": 3,
+    "dining table": 3,
+    "banana": 2,
+    "refrigerator": 2,
+    "oven": 1,
+    "microwave": 1,
+    "knife": 1,
+    "potted plant": 1,
+    "bottle": 1
+  },
+  "rug_like_points": 2174,
+  "room_name": "living_room"
+}
