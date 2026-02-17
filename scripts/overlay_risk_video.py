@@ -378,7 +378,8 @@ def _draw_ot_note(frame: np.ndarray, text: str) -> None:
     y0 = frame.shape[0] - 18
     box_w = min(frame.shape[1] - 24, tw + pad * 2)
     box_h = th + pad
-    cv2.rectangle(frame, (x0, y0 - box_h), (x0 + box_w, y0), (0, 0, 0), thickness=-1)
+    # Light orange background with white text.
+    cv2.rectangle(frame, (x0, y0 - box_h), (x0 + box_w, y0), (180, 210, 255), thickness=-1)
     cv2.putText(frame, text, (x0 + pad, y0 - 6), font, scale, (255, 255, 255), thickness, cv2.LINE_AA)
 
 
@@ -604,7 +605,8 @@ def _draw_ot_chat(frame: np.ndarray, notes: List[str], max_items: int) -> None:
     shown = 0
     for text in notes[-max_items:]:
         y = y0 + shown * line_h
-        cv2.rectangle(frame, (x0, y - line_h + 4), (x0 + box_w, y + 4), (0, 0, 0), thickness=-1)
+        # Light orange background with white text.
+        cv2.rectangle(frame, (x0, y - line_h + 4), (x0 + box_w, y + 4), (180, 210, 255), thickness=-1)
         cv2.putText(frame, text, (x0 + 8, y), font, scale, (255, 255, 255), thickness, cv2.LINE_AA)
         shown += 1
 
@@ -623,7 +625,8 @@ def _draw_dme_strip(frame: np.ndarray, notes: List[str], max_items: int) -> None
     shown = 0
     for text in notes[-max_items:]:
         y = y0 - shown * line_h
-        cv2.rectangle(frame, (x0, y - line_h - 2), (x0 + box_w, y + 2), (0, 0, 0), thickness=-1)
+        # Light green background with white text.
+        cv2.rectangle(frame, (x0, y - line_h - 2), (x0 + box_w, y + 2), (180, 255, 200), thickness=-1)
         cv2.putText(frame, text, (x0 + pad, y - 6), font, scale, (255, 255, 255), thickness, cv2.LINE_AA)
         shown += 1
 
